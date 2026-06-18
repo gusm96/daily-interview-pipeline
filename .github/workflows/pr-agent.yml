@@ -23,8 +23,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Google AI Studio에서 발급받은 Gemini API 키 매핑
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # 사용할 Gemini 모델 지정 (gemini/ 접두사 필수)
-          # 최신 고성능 모델인 gemini-3.1-pro 권장
-          config.model: "gemini/gemini-3.1-pro"
-          # PR 에이전트의 기본 언어 설정 (한국어 출력)
-          PR_REVIEWS.LANGUAGE: "Korean"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # PR-Agent 설정 (Double Underscore 사용)
+          CONFIG__MODEL: "gemini/gemini-3.1-pro"
+          CONFIG__MODEL_PROVIDER: "google"
+          PR_REVIEWS__LANGUAGE: "Korean"
