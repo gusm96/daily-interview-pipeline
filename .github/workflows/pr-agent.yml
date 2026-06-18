@@ -23,11 +23,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Google AI Studio에서 발급받은 Gemini API 키 매핑
           # PR-Agent가 OpenAI가 아닌 Gemini를 기본 제공자로 인식하게 하려면 아래의 전용 변수명이 필수입니다.
-          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_AI_STUDIO__GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # PR-Agent 설정 (Double Underscore 사용)
-          CONFIG__MODEL: "gemini/gemini-1.5-pro"
-          CONFIG__MODEL_PROVIDER: "google"
+          # PR-Agent 설정 (언어 설정)
           PR_REVIEWS__LANGUAGE: "Korean"
