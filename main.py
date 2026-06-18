@@ -1,5 +1,6 @@
 import base64
 from datetime import date
+import functions_framework
 import hashlib
 import hmac
 from functools import partial
@@ -10,6 +11,7 @@ import re
 import requests
 import time
 from slack_sdk import WebClient
+
 
 
 
@@ -396,8 +398,10 @@ def handle_slack_event(payload):
         logger.exception("README 갱신 실패(불일치 가능): %s", qid)
 
 
+@functions_framework.http
 def daily_interview_bot(request):
     """통합 엔트리포인트. (body, status) 반환 (functions-framework 호환)."""
+
     # 루틴 A: Scheduler
     if request.args.get("action") == "generate":
         try:
