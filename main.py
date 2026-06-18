@@ -6,6 +6,8 @@ import os
 import re
 import requests
 import time
+from slack_sdk import WebClient
+
 
 
 
@@ -255,6 +257,29 @@ def github_commit_with_retry(mutate_fn, message, max_retries=3):
             continue
         raise GitHubError(f"커밋 실패: {resp.status_code}")
     raise GitHubError("409 재시도 소진")
+
+
+def _slack_client():
+    return WebClient(token=os.environ.get("SLACK_BOT_TOKEN", ""))
+
+
+def slack_post_message(channel, text, thread_ts=None):
+    """슬랙 메시지/스레드 댓글 전송."""
+    client = _slack_client()
+    if thread_ts:
+        client.chat_postMessage(channel=channel, text=text, thread_ts=thread_ts)
+    else:
+        client.chat_postMessage(channel=channel, text=text)
+    logger.info("Slack 전송 성공: channel=%s thread=%s", channel, thread_ts)
+
+
+def slack_get_thread_parent(channel, thread_ts):
+    """스레드의 부모(루트) 메시지 텍스트 반환."""
+    client = _slack_client()
+    resp = client.conversations_replies(channel=channel, ts=thread_ts, limit=1)
+    msgs = resp.get("messages", [])
+    return msgs[0]["text"] if msgs else ""
+
 
 
 

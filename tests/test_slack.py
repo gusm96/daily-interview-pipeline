@@ -1,7 +1,9 @@
 import hashlib
 import hmac
 import time
+from unittest.mock import patch, MagicMock
 import main
+
 
 
 class FakeRequest:
@@ -64,4 +66,26 @@ def test_extract_user_answer_ignores_bot(monkeypatch):
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     event = {"user": "UBOT", "text": "봇답", "thread_ts": "1", "ts": "2"}
     assert main.extract_user_answer(event) is None
+
+
+def test_slack_post_message_calls_sdk(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb")
+    fake_client = MagicMock()
+    with patch("main.WebClient", return_value=fake_client):
+        main.slack_post_message("C1", "안녕", thread_ts="123.4")
+    fake_client.chat_postMessage.assert_called_once_with(
+        channel="C1", text="안녕", thread_ts="123.4"
+    )
+
+
+def test_slack_get_thread_parent_returns_text(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb")
+    fake_client = MagicMock()
+    fake_client.conversations_replies.return_value = {
+        "messages": [{"text": "부모 [Q016] 질문", "ts": "123.4"}]
+    }
+    with patch("main.WebClient", return_value=fake_client):
+        text = main.slack_get_thread_parent("C1", "123.4")
+    assert text == "부모 [Q016] 질문"
+
 
