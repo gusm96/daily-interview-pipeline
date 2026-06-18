@@ -357,6 +357,46 @@ def run_generate_routine():
             logger.exception("Slack 질문 전송 실패: %s", qid)
 
 
+def handle_slack_event(payload):
+    """루틴 B: 답변 추출 → ID 매핑 → Gemini 채점 → Slack 피드백 + README 갱신."""
+    event = payload.get("event", {})
+    answer = extract_user_answer(event)
+    if not answer:
+        logger.info("무시할 이벤트(봇/시스템/최상위/빈 답변)")
+        return
+
+    channel = event.get("channel", "")
+    thread_ts = event.get("thread_ts")
+    parent_text = slack_get_thread_parent(channel, thread_ts)
+    qid = parse_question_id(parent_text)
+    if not qid:
+        logger.info("부모 메시지에서 질문 ID를 찾지 못함")
+        return
+
+    feedback = call_gemini(
+        "너는 백엔드 면접관이다. 아래 답변의 기술적 정확성을 평가하라. 방향이 옳으면 "
+        "가볍게 칭찬하고 부족한 키워드를 짚고, 치명적 오개념이면 정중히 교정하고 모범 방향을 제시하라.\n"
+        f"답변: {answer}",
+        temperature=0.4,
+    )
+
+    # 1) Slack 피드백 (해당 스레드)
+    try:
+        slack_post_message(channel, f"🤖 *AI 피드백*\n{feedback}", thread_ts=thread_ts)
+    except Exception:
+        logger.exception("Slack 피드백 전송 실패")
+
+    # 2) README 갱신 (멱등 mutate + 409 재시도)
+    try:
+        github_commit_with_retry(
+            lambda c: update_answer_block(c, qid, answer, feedback),
+            f"update {qid} answer",
+        )
+    except Exception:
+        logger.exception("README 갱신 실패(불일치 가능): %s", qid)
+
+
+
 
 
 

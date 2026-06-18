@@ -62,3 +62,48 @@ def test_run_generate_routine_flow(monkeypatch, sample_readme):
     assert len(posted) == 2
     assert any("Q003" in t for t in posted)
 
+
+def test_handle_slack_event_grades_and_commits(monkeypatch, sample_readme):
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append((text, thread_ts)))
+    monkeypatch.setattr(main, "slack_get_thread_parent",
+                        lambda ch, ts: "오늘의 질문 [Q002] OSI 7계층")
+    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "좋은 답변입니다")
+
+    committed = {}
+
+    def fake_commit(mutate_fn, message, max_retries=3):
+        new_content, result = mutate_fn(sample_readme)
+        committed["msg"] = message
+        committed["content"] = new_content
+        return new_content, result
+
+    monkeypatch.setattr(main, "github_commit_with_retry", fake_commit)
+
+    payload = {"event": {
+        "type": "message", "user": "UHUMAN", "text": "OSI는 7계층입니다",
+        "thread_ts": "111.1", "ts": "111.2", "channel": "C1",
+    }}
+    main.handle_slack_event(payload)
+
+    # 피드백이 해당 스레드로 전송
+    assert posted and posted[0][1] == "111.1"
+    # README Q002 갱신 커밋
+    assert "OSI는 7계층입니다" in committed["content"]
+    assert "좋은 답변입니다" in committed["content"]
+
+
+def test_handle_slack_event_ignores_bot(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    called = []
+    monkeypatch.setattr(main, "call_gemini", lambda *a, **k: called.append(1))
+    payload = {"event": {"type": "message", "user": "UBOT",
+                         "text": "x", "thread_ts": "1", "ts": "2", "channel": "C1"}}
+    main.handle_slack_event(payload)
+    assert called == []  # 봇 메시지는 채점하지 않음
+
+
