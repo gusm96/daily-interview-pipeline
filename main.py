@@ -155,6 +155,26 @@ def verify_slack_signature(request):
     return hmac.compare_digest(expected, sig)
 
 
+def is_bot_or_self(event):
+    """봇/시스템/자기 메시지 판정 (M-6)."""
+    if event.get("bot_id") or event.get("subtype"):
+        return True
+    bot_user = os.environ.get("SLACK_BOT_USER_ID", "")
+    return bool(bot_user) and event.get("user") == bot_user
+
+
+def extract_user_answer(event):
+    """스레드 답변인 순수 사용자 텍스트 반환. 무시 대상이면 None.
+    thread_ts 없는 최상위 메시지도 무시(이 함수가 thread_ts 판정 담당)."""
+    if is_bot_or_self(event):
+        return None
+    if not event.get("thread_ts"):
+        return None
+    text = (event.get("text") or "").strip()
+    return text or None
+
+
+
 
 
 

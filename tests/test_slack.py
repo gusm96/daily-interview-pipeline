@@ -37,3 +37,31 @@ def test_verify_stale_timestamp(monkeypatch):
     old = str(int(time.time()) - 60 * 10)  # 10분 전
     req = _signed_request("shhh", b'{"ok":true}', ts=old)
     assert main.verify_slack_signature(req) is False
+
+
+def test_is_bot_or_self_detects_bot(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    assert main.is_bot_or_self({"bot_id": "B1", "user": "U2"}) is True
+    assert main.is_bot_or_self({"user": "UBOT"}) is True
+    assert main.is_bot_or_self({"subtype": "message_changed", "user": "U2"}) is True
+    assert main.is_bot_or_self({"user": "UHUMAN", "text": "hi"}) is False
+
+
+def test_extract_user_answer_returns_text(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    event = {"user": "UHUMAN", "text": "내 답변", "thread_ts": "123.45", "ts": "123.46"}
+    assert main.extract_user_answer(event) == "내 답변"
+
+
+def test_extract_user_answer_ignores_top_level(monkeypatch):
+    # thread_ts 없는 최상위 메시지는 무시
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    event = {"user": "UHUMAN", "text": "최상위", "ts": "123.46"}
+    assert main.extract_user_answer(event) is None
+
+
+def test_extract_user_answer_ignores_bot(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    event = {"user": "UBOT", "text": "봇답", "thread_ts": "1", "ts": "2"}
+    assert main.extract_user_answer(event) is None
+
