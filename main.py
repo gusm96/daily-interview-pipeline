@@ -1,8 +1,11 @@
 import hashlib
 import hmac
+import logging
 import os
 import re
+import requests
 import time
+
 
 
 _FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
@@ -172,6 +175,32 @@ def extract_user_answer(event):
         return None
     text = (event.get("text") or "").strip()
     return text or None
+
+
+logger = logging.getLogger("daily_interview_bot")
+
+GEMINI_TIMEOUT = 8  # 초 (§8.5)
+
+
+def call_gemini(prompt, temperature):
+    """Gemini generateContent REST 호출 → 텍스트 추출 → 펜스 제거."""
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": temperature},
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=GEMINI_TIMEOUT)
+    if not resp.ok:
+        logger.error("Gemini API 실패: status=%s", resp.status_code)
+        resp.raise_for_status()
+    data = resp.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    logger.info("Gemini 호출 성공 (model=%s)", model)
+    return strip_markdown_fence(text)
+
 
 
 
