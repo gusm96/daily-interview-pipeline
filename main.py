@@ -114,6 +114,23 @@ def append_questions(questions, readme, date_str=None):
     return content, ids
 
 
+def fill_unanswered_questions(answer_map, readme):
+    """mutate_fn(partial(fill_unanswered_questions, answer_map)). 최신 readme에서 미답변
+    (본문 공백 AND AI 태그 없음)인 qid에만, answer_map의 답변을 AI 태그와 함께 주입.
+    (new_content, 채운 qid 목록) 반환. 이미 채워진 블록은 건너뜀(멱등, Minor-1)."""
+    content = readme
+    filled = []
+    unanswered_ids = {qid for qid, _ in find_unanswered_questions(content)}
+    for qid in unanswered_ids:
+        if qid not in answer_map:
+            continue
+        tagged = f"{AI_AUTO_TAG}\n  {answer_map[qid]}"
+        content, _ = update_answer_block(content, qid, tagged, "(AI 자동 작성 - 검토 필요)")
+        filled.append(qid)
+    return content, sorted(filled)
+
+
+
 
 
 

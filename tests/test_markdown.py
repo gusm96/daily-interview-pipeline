@@ -140,6 +140,24 @@ def test_append_questions_reapply_recomputes_ids():
     assert assigned == ["Q004"]  # 최신 기준 재계산
 
 
+def test_fill_unanswered_injects_tagged_answer(sample_readme):
+    answer_map = {"Q002": "AI 모범답안 본문"}
+    new_content, filled = main.fill_unanswered_questions(answer_map, sample_readme)
+    assert filled == ["Q002"]
+    assert main.AI_AUTO_TAG in new_content
+    assert "AI 모범답안 본문" in new_content
+
+
+def test_fill_unanswered_idempotent_skips_answered(sample_readme):
+    # Q001은 이미 답변 있음 → 맵에 있어도 건너뜀(멱등)
+    answer_map = {"Q001": "덮어쓰면 안됨", "Q002": "정상"}
+    new_content, filled = main.fill_unanswered_questions(answer_map, sample_readme)
+    assert filled == ["Q002"]
+    assert "덮어쓰면 안됨" not in new_content
+    assert "TCP는 연결지향이고" in new_content
+
+
+
 
 
 
