@@ -1,4 +1,9 @@
+import hashlib
+import hmac
+import os
 import re
+import time
+
 
 _FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
 
@@ -128,6 +133,27 @@ def fill_unanswered_questions(answer_map, readme):
         content, _ = update_answer_block(content, qid, tagged, "(AI 자동 작성 - 검토 필요)")
         filled.append(qid)
     return content, sorted(filled)
+
+
+def verify_slack_signature(request):
+    """Slack 서명검증: HMAC-SHA256(v0:{ts}:{body}), 5분 윈도우, 상수시간 비교."""
+    secret = os.environ.get("SLACK_SIGNING_SECRET", "")
+    ts = request.headers.get("X-Slack-Request-Timestamp", "")
+    sig = request.headers.get("X-Slack-Signature", "")
+    if not secret or not ts or not sig:
+        return False
+    try:
+        if abs(time.time() - int(ts)) > 60 * 5:
+            return False
+    except ValueError:
+        return False
+    body = request.get_data()
+    if isinstance(body, str):
+        body = body.encode()
+    basestring = f"v0:{ts}:".encode() + body
+    expected = "v0=" + hmac.new(secret.encode(), basestring, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+
 
 
 
