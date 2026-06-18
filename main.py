@@ -396,6 +396,41 @@ def handle_slack_event(payload):
         logger.exception("README 갱신 실패(불일치 가능): %s", qid)
 
 
+def daily_interview_bot(request):
+    """통합 엔트리포인트. (body, status) 반환 (functions-framework 호환)."""
+    # 루틴 A: Scheduler
+    if request.args.get("action") == "generate":
+        try:
+            run_generate_routine()
+            return ("OK: questions generated", 200)
+        except Exception:
+            logger.exception("루틴 A 실패")
+            return ("error", 500)
+
+    # 슬랙 경로: 서명검증 우선 (C-1)
+    if not verify_slack_signature(request):
+        logger.warning("Slack 서명검증 실패")
+        return ("invalid signature", 401)
+
+    # 재시도 즉시 차단 (Minor-3, 중복 채점 방지)
+    if request.headers.get("X-Slack-Retry-Num"):
+        return ("OK: retry ignored", 200)
+
+    payload = request.get_json(silent=True) or {}
+    if payload.get("type") == "url_verification":
+        return (payload.get("challenge", ""), 200)
+
+    if payload.get("type") == "event_callback":
+        try:
+            handle_slack_event(payload)
+        except Exception:
+            logger.exception("루틴 B 실패")
+        return ("OK", 200)
+
+    return ("ignored", 200)
+
+
+
 
 
 

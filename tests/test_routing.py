@@ -107,3 +107,63 @@ def test_handle_slack_event_ignores_bot(monkeypatch):
     assert called == []  # 봇 메시지는 채점하지 않음
 
 
+class FakeReq:
+    def __init__(self, args=None, body=b"{}", headers=None, json_data=None):
+        self.args = args or {}
+        self._body = body
+        self.headers = headers or {}
+        self._json = json_data
+
+    def get_data(self):
+        return self._body
+
+    def get_json(self, silent=False):
+        return self._json
+
+
+def test_entry_routes_generate(monkeypatch):
+    called = []
+    monkeypatch.setattr(main, "run_generate_routine", lambda: called.append("A"))
+    req = FakeReq(args={"action": "generate"})
+    body, status = main.daily_interview_bot(req)
+    assert status == 200
+    assert called == ["A"]
+
+
+def test_entry_url_verification_after_signature(monkeypatch):
+    monkeypatch.setattr(main, "verify_slack_signature", lambda r: True)
+    req = FakeReq(json_data={"type": "url_verification", "challenge": "abc"})
+    body, status = main.daily_interview_bot(req)
+    assert status == 200
+    assert body == "abc"
+
+
+def test_entry_rejects_bad_signature(monkeypatch):
+    monkeypatch.setattr(main, "verify_slack_signature", lambda r: False)
+    req = FakeReq(json_data={"type": "event_callback"})
+    body, status = main.daily_interview_bot(req)
+    assert status == 401
+
+
+def test_entry_retry_num_short_circuits(monkeypatch):
+    monkeypatch.setattr(main, "verify_slack_signature", lambda r: True)
+    called = []
+    monkeypatch.setattr(main, "handle_slack_event", lambda p: called.append("B"))
+    req = FakeReq(headers={"X-Slack-Retry-Num": "1"},
+                  json_data={"type": "event_callback", "event": {}})
+    body, status = main.daily_interview_bot(req)
+    assert status == 200
+    assert called == []  # 재시도는 즉시 200, 처리 안함
+
+
+def test_entry_routes_event_callback(monkeypatch):
+    monkeypatch.setattr(main, "verify_slack_signature", lambda r: True)
+    called = []
+    monkeypatch.setattr(main, "handle_slack_event", lambda p: called.append("B"))
+    req = FakeReq(json_data={"type": "event_callback", "event": {"text": "x"}})
+    body, status = main.daily_interview_bot(req)
+    assert status == 200
+    assert called == ["B"]
+
+
+
