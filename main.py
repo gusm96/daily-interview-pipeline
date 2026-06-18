@@ -1,12 +1,14 @@
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
 import requests
 import time
 from slack_sdk import WebClient
+
 
 
 
@@ -279,6 +281,38 @@ def slack_get_thread_parent(channel, thread_ts):
     resp = client.conversations_replies(channel=channel, ts=thread_ts, limit=1)
     msgs = resp.get("messages", [])
     return msgs[0]["text"] if msgs else ""
+
+
+REQUIRED_ENV = [
+    "GITHUB_TOKEN", "REPO_OWNER", "REPO_NAME", "GEMINI_API_KEY",
+    "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET", "SLACK_CHANNEL_ID", "SLACK_BOT_USER_ID",
+]
+
+CATEGORIES = [
+    "🖥️ CS (네트워크/OS)", "☕ Java", "🌱 Spring Boot",
+    "🗄️ Database", "⭐ 우대조건 (MSA / CI·CD / 대용량 트래픽 / 테스트)",
+]
+
+
+def validate_env():
+    """누락된 필수 환경변수 목록 반환(빈 리스트면 OK)."""
+    return [k for k in REQUIRED_ENV if not os.environ.get(k)]
+
+
+def generate_questions(readme):
+    """기존 README를 컨텍스트로 중복 없는 면접 질문 5개 생성.
+    [(category, question), ...] 반환. temperature=0.1 (정확도)."""
+    prompt = (
+        "너는 백엔드 기술 면접관이다. 아래 기존 README의 질문들과 절대 중복되지 않는 "
+        "한국어 백엔드 면접 질문 5개를 생성하라. 카테고리는 다음에서 골고루 분배: "
+        f"{CATEGORIES}. Oracle Java/Spring Reference/AWS 가이드 기준으로 기술적으로 정확해야 한다.\n"
+        '출력은 순수 JSON 배열만: [{"category":"<카테고리>","question":"<질문>"}, ...]\n\n'
+        f"=== 기존 README ===\n{readme}"
+    )
+    raw = call_gemini(prompt, temperature=0.1)
+    items = json.loads(raw)
+    return [(it["category"], it["question"]) for it in items]
+
 
 
 
