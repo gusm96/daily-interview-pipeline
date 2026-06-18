@@ -83,5 +83,34 @@ def test_find_unanswered_excludes_ai_tagged():
     assert main.find_unanswered_questions(readme) == []
 
 
+def test_update_answer_block_fills_and_returns_tuple(sample_readme):
+    new_content, result = main.update_answer_block(
+        sample_readme, "Q002", "내 답변입니다", "AI 피드백입니다"
+    )
+    assert result is None
+    assert "내 답변입니다" in new_content
+    assert "AI 피드백입니다" in new_content
+    # 다른 질문(Q001)은 그대로
+    assert "TCP는 연결지향이고" in new_content
+
+
+def test_update_answer_block_removes_ai_tag():
+    readme = (
+        "## CS\n- **[Q003] Q. 질문3** _(d)_\n  <details>\n"
+        "  <summary>s</summary>\n\n  ### 🧑‍💻 나의 답변\n"
+        f"  {main.AI_AUTO_TAG}\n  AI가 쓴 답.\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    )
+    new_content, _ = main.update_answer_block(readme, "Q003", "진짜 답변", "피드백")
+    assert main.AI_AUTO_TAG not in new_content
+    assert "진짜 답변" in new_content
+
+
+def test_update_answer_block_missing_id_raises(sample_readme):
+    import pytest
+    with pytest.raises(ValueError):
+        main.update_answer_block(sample_readme, "Q999", "x", "y")
+
+
+
 
 

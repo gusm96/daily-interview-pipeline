@@ -67,5 +67,27 @@ def find_unanswered_questions(readme):
     return out
 
 
+def update_answer_block(readme, qid, answer, feedback):
+    """qid 블록의 '나의 답변'/'AI 피드백' 칸을 치환. (new_content, None) 반환.
+    AI 자동 태그가 있으면 제거(C-3). 대상 미존재/치환 실패 시 ValueError(Mi-1)."""
+    # 해당 qid 블록의 details 내부 구간만 치환
+    block_pat = re.compile(
+        r"(-\s*\*\*\[" + re.escape(qid) + r"\]\s*Q\..*?"
+        r"### 🧑‍💻 나의 답변\n)(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*</details>)",
+        re.DOTALL,
+    )
+    new_answer = f"  {answer}\n"
+    new_feedback = f"  {feedback}\n"
+
+    def _repl(m):
+        return m.group(1) + new_answer + m.group(3) + new_feedback + m.group(5)
+
+    new_content, n = block_pat.subn(_repl, readme)
+    if n == 0:
+        raise ValueError(f"질문 블록을 찾지 못함: {qid}")
+    return new_content, None
+
+
+
 
 
