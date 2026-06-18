@@ -57,4 +57,31 @@ def test_build_question_block_format():
     assert block.strip().endswith("</details>")
 
 
+AI_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
+
+
+def test_find_unanswered_returns_empty_answer_only(sample_readme):
+    # Q001=답변있음(제외), Q002=공백(포함)
+    result = main.find_unanswered_questions(sample_readme)
+    ids = [qid for qid, _ in result]
+    assert "Q002" in ids
+    assert "Q001" not in ids
+
+
+def test_find_unanswered_includes_question_text(sample_readme):
+    result = dict(main.find_unanswered_questions(sample_readme))
+    assert result["Q002"] == "OSI 7계층을 설명하라."
+
+
+def test_find_unanswered_excludes_ai_tagged():
+    readme = (
+        "## CS\n- **[Q003] Q. 질문3** _(d)_\n  <details>\n"
+        "  <summary>s</summary>\n\n  ### 🧑‍💻 나의 답변\n"
+        f"  {AI_TAG}\n  AI가 쓴 답.\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    )
+    # AI 태그가 있으면 미답변으로 보지 않음 (재처리 제외)
+    assert main.find_unanswered_questions(readme) == []
+
+
+
 

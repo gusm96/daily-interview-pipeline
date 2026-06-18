@@ -47,4 +47,25 @@ def build_question_block(qid, question, date_str):
     )
 
 
+AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
+
+# 한 질문 블록 전체를 캡처: 헤더 + details 내부
+_BLOCK_RE = re.compile(
+    r"-\s*\*\*\[(Q\d{3,})\]\s*Q\.\s*(.*?)\*\*.*?"
+    r"### 🧑‍💻 나의 답변\s*(.*?)\s*### 🤖 AI 피드백",
+    re.DOTALL,
+)
+
+
+def find_unanswered_questions(readme):
+    """(qid, 질문텍스트) 목록 반환. 조건: 답변 본문 공백 AND AI 자동 태그 없음 (C-3)."""
+    out = []
+    for qid, question, answer_body in _BLOCK_RE.findall(readme or ""):
+        body = answer_body.strip()
+        if body == "" and AI_AUTO_TAG not in answer_body:
+            out.append((qid, question.strip()))
+    return out
+
+
+
 
