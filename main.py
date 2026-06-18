@@ -23,7 +23,10 @@ _FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
 
 
 def strip_markdown_fence(text):
-    """Gemini 응답을 감싼 최외곽 ```/```markdown 펜스만 제거. 내부 코드블록은 보존."""
+    """Gemini 응답을 감싼 최외곽 ```/```markdown 펜스만 제거. 내부 코드블록은 보존.
+
+    문자열 앞뒤 공백을 자르고 정규식을 활용하여 펜스를 파싱하여 제거함.
+    """
     if text is None:
         return ""
     m = _FENCE_RE.match(text)
