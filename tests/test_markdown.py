@@ -111,6 +111,36 @@ def test_update_answer_block_missing_id_raises(sample_readme):
         main.update_answer_block(sample_readme, "Q999", "x", "y")
 
 
+def test_append_questions_assigns_ids_and_returns_them(sample_readme):
+    questions = [
+        ("🖥️ CS (네트워크/OS)", "질문A"),
+        ("☕ Java", "질문B"),
+    ]
+    new_content, assigned = main.append_questions(questions, sample_readme, date_str="2026-06-18")
+    # sample 최대 Q002 → 다음 Q003, Q004
+    assert assigned == ["Q003", "Q004"]
+    assert "[Q003] Q. 질문A" in new_content
+    assert "[Q004] Q. 질문B" in new_content
+
+
+def test_append_questions_creates_missing_section():
+    readme = "# 제목\n## ☕ Java\n"
+    questions = [("🖥️ CS (네트워크/OS)", "새 CS 질문")]
+    new_content, assigned = main.append_questions(questions, readme, date_str="2026-06-18")
+    assert assigned == ["Q001"]
+    assert "## 🖥️ CS (네트워크/OS)" in new_content
+    assert "[Q001] Q. 새 CS 질문" in new_content
+
+
+def test_append_questions_reapply_recomputes_ids():
+    # 재적용(409) 시뮬레이션: 이미 Q003이 추가된 최신 content에 다시 append
+    readme = "## ☕ Java\n- **[Q003] Q. 기존** _(d)_\n  <details>\n  <summary>s</summary>\n\n  ### 🧑‍💻 나의 답변\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    questions = [("☕ Java", "질문B")]
+    _, assigned = main.append_questions(questions, readme, date_str="2026-06-18")
+    assert assigned == ["Q004"]  # 최신 기준 재계산
+
+
+
 
 
 

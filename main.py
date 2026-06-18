@@ -88,6 +88,33 @@ def update_answer_block(readme, qid, answer, feedback):
     return new_content, None
 
 
+def append_questions(questions, readme, date_str=None):
+    """mutate_fn(partial(append_questions, questions, date_str=...)). 최신 readme 기준으로
+    ID를 재할당해 카테고리 섹션 아래 append. (new_content, 할당된 ID 목록) 반환 (C-1).
+    카테고리 섹션이 없으면 생성 (Mi-4/S-5)."""
+    if date_str is None:
+        from datetime import date
+        date_str = date.today().isoformat()
+
+    content = readme if readme.endswith("\n") else readme + "\n"
+    ids = next_question_ids(content, len(questions))
+
+    for qid, (category, question) in zip(ids, questions):
+        block = build_question_block(qid, question, date_str)
+        header = f"## {category}"
+        if header in content:
+            # 해당 카테고리 섹션 헤더 라인 바로 뒤에 삽입
+            idx = content.index(header) + len(header)
+            # 헤더 줄 끝(다음 개행)까지 이동
+            nl = content.index("\n", idx)
+            content = content[: nl + 1] + "\n" + block + "\n" + content[nl + 1 :]
+        else:
+            # 섹션 신규 생성 후 append
+            content = content.rstrip("\n") + f"\n\n{header}\n\n{block}\n"
+    return content, ids
+
+
+
 
 
 
