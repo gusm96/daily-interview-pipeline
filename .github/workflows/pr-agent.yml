@@ -25,6 +25,6 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # PR-Agent 설정 (Double Underscore 사용)
-          CONFIG__MODEL: "gemini/gemini-3.1-pro"
+          CONFIG__MODEL: "gemini/gemini-1.5-pro"
           CONFIG__MODEL_PROVIDER: "google"
           PR_REVIEWS__LANGUAGE: "Korean"
