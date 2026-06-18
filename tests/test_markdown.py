@@ -18,3 +18,17 @@ def test_strip_preserves_inner_code_block():
 
 def test_strip_no_fence_returns_trimmed():
     assert main.strip_markdown_fence("  그냥 텍스트  ") == "그냥 텍스트"
+
+
+def test_parse_question_id_bracket_anchor():
+    assert main.parse_question_id("오늘의 질문 [Q016] 입니다") == "Q016"
+
+
+def test_parse_question_id_ignores_bare_text():
+    # 대괄호 없는 Q001은 무시 (오탐 방지)
+    assert main.parse_question_id("Q001 이 뭔가요?") is None
+
+
+def test_parse_question_id_none_when_absent():
+    assert main.parse_question_id("ID 없는 메시지") is None
+
