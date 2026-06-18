@@ -48,3 +48,13 @@ def test_next_question_ids_only_scans_headers():
     assert main.next_question_ids(readme, 1) == ["Q006"]
 
 
+def test_build_question_block_format():
+    block = main.build_question_block("Q016", "TCP 3-way handshake를 설명하라.", "2026-06-18")
+    assert "- **[Q016] Q. TCP 3-way handshake를 설명하라.** _(2026-06-18)_" in block
+    assert "<details>" in block
+    assert "### 🧑‍💻 나의 답변" in block
+    assert "### 🤖 AI 피드백" in block
+    assert block.strip().endswith("</details>")
+
+
+

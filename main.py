@@ -35,3 +35,16 @@ def next_question_ids(readme, count):
     return [f"Q{n:03d}" for n in range(start, start + count)]
 
 
+def build_question_block(qid, question, date_str):
+    """스펙 §7 접이식 질문 블록 마크다운 생성 (답변/피드백 칸 공백)."""
+    return (
+        f"- **[{qid}] Q. {question}** _({date_str})_\n"
+        f"  <details>\n"
+        f"  <summary>💡 나의 답변 및 AI 피드백 보기/접기</summary>\n\n"
+        f"  ### 🧑‍💻 나의 답변\n\n"
+        f"  ### 🤖 AI 피드백\n\n"
+        f"  </details>"
+    )
+
+
+
