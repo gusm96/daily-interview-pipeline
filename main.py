@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import logging
@@ -5,6 +6,7 @@ import os
 import re
 import requests
 import time
+
 
 
 
@@ -200,6 +202,60 @@ def call_gemini(prompt, temperature):
     text = data["candidates"][0]["content"]["parts"][0]["text"]
     logger.info("Gemini 호출 성공 (model=%s)", model)
     return strip_markdown_fence(text)
+
+
+GITHUB_API = "https://api.github.com"
+
+
+class GitHubError(Exception):
+    pass
+
+
+def _github_headers():
+    return {
+        "Authorization": f"Bearer {os.environ.get('GITHUB_TOKEN', '')}",
+        "Accept": "application/vnd.github+json",
+    }
+
+
+def _readme_url():
+    owner = os.environ.get("REPO_OWNER", "")
+    name = os.environ.get("REPO_NAME", "")
+    return f"{GITHUB_API}/repos/{owner}/{name}/contents/README.md"
+
+
+def github_get_readme():
+    """README content(디코딩) + sha 반환."""
+    resp = requests.get(_readme_url(), headers=_github_headers(), timeout=10)
+    if not resp.ok:
+        raise GitHubError(f"README 조회 실패: {resp.status_code}")
+    data = resp.json()
+    content = base64.b64decode(data["content"]).decode("utf-8")
+    return content, data["sha"]
+
+
+def github_commit_with_retry(mutate_fn, message, max_retries=3):
+    """README 조회 → (new, result)=mutate_fn(content) → PUT. 409 시 재조회·재적용·재시도.
+    성공 시 (new_content, result) 반환 (C-1/C-2)."""
+    for attempt in range(max_retries):
+        content, sha = github_get_readme()
+        new_content, result = mutate_fn(content)
+        payload = {
+            "message": message,
+            "content": base64.b64encode(new_content.encode("utf-8")).decode(),
+            "sha": sha,
+        }
+        resp = requests.put(_readme_url(), headers=_github_headers(), json=payload, timeout=10)
+        if resp.ok:
+            logger.info("GitHub 커밋 성공: %s", message)
+            return new_content, result
+        if resp.status_code == 409:
+            logger.warning("GitHub 409 충돌, 재시도 %d/%d", attempt + 1, max_retries)
+            time.sleep(2 ** attempt)
+            continue
+        raise GitHubError(f"커밋 실패: {resp.status_code}")
+    raise GitHubError("409 재시도 소진")
+
 
 
 
