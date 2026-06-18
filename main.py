@@ -23,3 +23,15 @@ def parse_question_id(text):
     m = _QID_RE.search(text)
     return f"Q{m.group(1)}" if m else None
 
+
+# 질문 헤더 라인만 스캔 (M-2): "- **[Q###] ..." 형태만 매칭
+_HEADER_ID_RE = re.compile(r"^\s*-\s*\*\*\[Q(\d{3,})\]", re.MULTILINE)
+
+
+def next_question_ids(readme, count):
+    """README의 질문 헤더 라인만 스캔해 최대 ID+1부터 count개 ID 반환."""
+    nums = [int(n) for n in _HEADER_ID_RE.findall(readme or "")]
+    start = (max(nums) + 1) if nums else 1
+    return [f"Q{n:03d}" for n in range(start, start + count)]
+
+

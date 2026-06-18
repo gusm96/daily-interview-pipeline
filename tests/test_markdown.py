@@ -32,3 +32,19 @@ def test_parse_question_id_ignores_bare_text():
 def test_parse_question_id_none_when_absent():
     assert main.parse_question_id("ID 없는 메시지") is None
 
+
+def test_next_question_ids_continues_from_max(sample_readme):
+    # sample_readme의 최대 ID는 Q002 → 다음은 Q003~Q005
+    assert main.next_question_ids(sample_readme, 3) == ["Q003", "Q004", "Q005"]
+
+
+def test_next_question_ids_from_empty():
+    assert main.next_question_ids("# 제목\n## CS\n", 2) == ["Q001", "Q002"]
+
+
+def test_next_question_ids_only_scans_headers():
+    # 본문/코드블록의 [Q999]는 무시, 헤더 라인만 스캔
+    readme = "## CS\n- **[Q005] Q. 질문** _(d)_\n  본문에 [Q999] 언급\n"
+    assert main.next_question_ids(readme, 1) == ["Q006"]
+
+
