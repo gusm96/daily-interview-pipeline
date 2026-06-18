@@ -30,3 +30,35 @@ def test_generate_questions_returns_category_tuples(monkeypatch):
         result = main.generate_questions("기존 readme")
     assert ("🖥️ CS (네트워크/OS)", "Q1") in result
     assert len(result) == 2
+
+
+def test_run_generate_routine_flow(monkeypatch, sample_readme):
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    # Gemini 모범답안 + 질문 생성 모킹
+    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
+    monkeypatch.setattr(main, "generate_questions",
+                        lambda r: [("☕ Java", "새 질문1"), ("🗄️ Database", "새 질문2")])
+
+    commits = []
+
+    def fake_commit(mutate_fn, message, max_retries=3):
+        new_content, result = mutate_fn(sample_readme)
+        commits.append(message)
+        return new_content, result
+
+    monkeypatch.setattr(main, "github_commit_with_retry", fake_commit)
+    monkeypatch.setattr(main, "github_get_readme", lambda: (sample_readme, "sha"))
+
+    main.run_generate_routine()
+
+    # 미답변(Q002) 채움 커밋 + 질문 append 커밋 = 2회
+    assert len(commits) == 2
+    # Slack에 질문 2개 개별 전송, ID 포함
+    assert len(posted) == 2
+    assert any("Q003" in t for t in posted)
+

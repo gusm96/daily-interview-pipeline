@@ -1,6 +1,8 @@
 import base64
+from datetime import date
 import hashlib
 import hmac
+from functools import partial
 import json
 import logging
 import os
@@ -8,6 +10,7 @@ import re
 import requests
 import time
 from slack_sdk import WebClient
+
 
 
 
@@ -312,6 +315,47 @@ def generate_questions(readme):
     raw = call_gemini(prompt, temperature=0.1)
     items = json.loads(raw)
     return [(it["category"], it["question"]) for it in items]
+
+
+def run_generate_routine():
+    """루틴 A: 미답변 자동 채움 → 신규 질문 생성/커밋 → Slack 전송."""
+    missing = validate_env()
+    if missing:
+        logger.error("필수 환경변수 누락: %s", missing)
+        raise RuntimeError(f"환경변수 누락: {missing}")
+
+    # 1) 미답변 식별 + 모범답안 선생성
+    content, _ = github_get_readme()
+    unanswered = find_unanswered_questions(content)
+    if unanswered:
+        answer_map = {}
+        for qid, question in unanswered:
+            answer_map[qid] = call_gemini(
+                f"다음 백엔드 면접 질문의 모범답안을 한국어로 간결히 작성하라.\n질문: {question}",
+                temperature=0.1,
+            )
+        github_commit_with_retry(
+            partial(fill_unanswered_questions, answer_map), "fill unanswered questions"
+        )
+
+    # 2) 신규 질문 생성 (ID 미확정)
+    content, _ = github_get_readme()
+    questions = generate_questions(content)
+
+    # 3) append 커밋 + 확정 ID 회수
+    today = date.today().isoformat()
+    _, assigned_ids = github_commit_with_retry(
+        partial(append_questions, questions, date_str=today), "add daily questions"
+    )
+
+    # 4) Slack 전송 (확정 ID 사용)
+    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    for qid, (category, question) in zip(assigned_ids, questions):
+        try:
+            slack_post_message(channel, f"*[{qid}] {category}*\n{question}")
+        except Exception:
+            logger.exception("Slack 질문 전송 실패: %s", qid)
+
 
 
 
