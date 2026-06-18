@@ -1,0 +1,30 @@
+name: PR Agent (AI Code Reviewer)
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
+jobs:
+  pr_agent_job:
+    # 봇이 생성한 이벤트는 무시 (무한루프 방지)
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+
+    steps:
+      - name: PR Agent action
+        uses: qodo-ai/pr-agent@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Google AI Studio에서 발급받은 Gemini API 키 매핑
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # 사용할 Gemini 모델 지정 (gemini/ 접두사 필수)
+          # 최신 고성능 모델인 gemini-3.1-pro 권장
+          config.model: "gemini/gemini-3.1-pro"
+          # PR 에이전트의 기본 언어 설정 (한국어 출력)
+          PR_REVIEWS.LANGUAGE: "Korean"

@@ -1,0 +1,77 @@
+name: Build and Deploy to GCP
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: "YOUR_GCP_PROJECT_ID" # GCP 프로젝트 ID를 입력하세요.
+  REGION: "asia-northeast3"         # 리전 (예: 서울 리전)
+  SERVICE_NAME: "daily-interview-bot"
+
+jobs:
+  deploy:
+    name: Deploy to GCP
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation 인증을 위해 필요
+
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    # 1. Google Cloud 인증
+    # WIF(Workload Identity Federation) 방식을 권장합니다.
+    # 만약 기존 Service Account Key 방식을 사용한다면 아래 credentials_json의 주석을 풀고 사용하세요.
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        # [WIF 방식 설정 시 사용]
+        workload_identity_provider: 'projects/YOUR_PROJECT_NUMBER/locations/global/workloadIdentityPools/YOUR_POOL_NAME/providers/YOUR_PROVIDER_NAME'
+        service_account: 'YOUR_SERVICE_ACCOUNT@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com'
+        # [Service Account Key 방식 설정 시 사용 (GitHub Secrets에 GCP_SA_KEY 등록 필요)]
+        # credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    # =========================================================================
+    # 선택지 A: Google Cloud Run 배포 (직접 빌드한 Docker Image 배포 시 권장)
+    # =========================================================================
+    # 2. Artifact Registry 로그인
+    - name: Log in to Google Artifact Registry
+      run: |
+        gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+    # 3. Docker Image 빌드 및 푸시 (Artifact Registry 전송)
+    - name: Build and Push Docker Image
+      run: |
+        IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+        docker build -t $IMAGE_TAG .
+        docker push $IMAGE_TAG
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+    # 4. Cloud Run 배포 (Serverless Container 구동)
+    - name: Deploy to Cloud Run
+      uses: google-github-actions/deploy-cloudrun@v2
+      with:
+        service: ${{ env.SERVICE_NAME }}
+        region: ${{ env.REGION }}
+        image: ${{ env.IMAGE_TAG }}
+        # 필요한 경우 Cloud Run 환경 변수 주입 가능
+        # env_vars: |
+        #   REPO_OWNER=gusm96
+        #   REPO_NAME=daily-interview-pipeline
+
+    # =========================================================================
+    # 선택지 B: Google Cloud Functions 배포 (소스 코드 배포 방식 - Dockerfile 포함)
+    # 만약 Cloud Run 대신 Cloud Functions 서비스로 직접 관리하고 싶다면,
+    # 위 선택지 A의 2~4단계를 주석 처리하고 아래 단계를 활성화하여 사용하세요.
+    # =========================================================================
+    # - name: Deploy to Cloud Functions
+    #   uses: google-github-actions/deploy-cloudfunctions@v2
+    #   with:
+    #     name: ${{ env.SERVICE_NAME }}
+    #     runtime: python311
+    #     entry_point: daily_interview_bot
+    #     region: ${{ env.REGION }}

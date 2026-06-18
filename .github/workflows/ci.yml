@@ -1,0 +1,58 @@
+name: CI (Continuous Integration)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Tests & Verify Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install flake8 # 정적 코드 분석을 위해 설치
+
+    - name: Lint with flake8
+      run: |
+        # 구문 에러나 정의되지 않은 이름 검사 (경고 레벨은 통과하되 에러 레벨만 엄격히 차단)
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # 스타일 가이드 경고 (길이 등)는 127자로 유연하게 적용
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run Test Suite
+      run: |
+        python -m pytest
+
+  docker-dry-run:
+    name: Dry-Run Docker Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker Image (No Push)
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: false # PR 단계에서는 빌드가 성공하는지만 확인하고 푸시하지 않음
+        tags: daily-interview-bot:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

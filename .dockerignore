@@ -1,0 +1,23 @@
+# Ignore git and github configurations
+.git
+.github
+
+# Ignore documentation and prompts
+docs/
+prompt.md
+CLAUDE.md
+LICENSE
+README.md
+
+# Ignore local python caches and virtualenvs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+venv/
+.venv/
+env/
+
+# Ignore tests
+tests/
