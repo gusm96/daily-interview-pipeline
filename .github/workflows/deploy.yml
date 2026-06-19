@@ -79,4 +79,4 @@ jobs:
           SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
           SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }}
           SLACK_BOT_USER_ID=${{ secrets.SLACK_BOT_USER_ID }}
-          GEMINI_MODEL=gemini-2.0-flash
+          GEMINI_MODEL=gemini-2.5-flash
