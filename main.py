@@ -361,7 +361,7 @@ def run_generate_routine():
     channel = os.environ.get("SLACK_CHANNEL_ID", "")
     for qid, (category, title, question) in zip(assigned_ids, questions):
         try:
-            slack_post_message(channel, f"*[{qid}] {category}*\n{question}")
+            slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
         except Exception:
             logger.exception("Slack 질문 전송 실패: %s", qid)
 
