@@ -193,7 +193,7 @@ def extract_user_answer(event):
 
 logger = logging.getLogger("daily_interview_bot")
 
-GEMINI_TIMEOUT = 8  # 초 (§8.5)
+GEMINI_TIMEOUT = 30  # 초 (§8.5). 루틴 A는 Scheduler 호출이라 3초 제약 없음. 2.5-flash 지연 여유.
 
 
 def call_gemini(prompt, temperature):
@@ -204,7 +204,11 @@ def call_gemini(prompt, temperature):
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": temperature},
+        "generationConfig": {
+            "temperature": temperature,
+            # 2.5-flash 기본 thinking 비활성화 → 지연·비용 절감 (질문 생성/채점엔 충분)
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=GEMINI_TIMEOUT)
     if not resp.ok:
