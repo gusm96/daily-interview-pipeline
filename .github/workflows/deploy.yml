@@ -69,8 +69,8 @@ jobs:
         entry_point: daily_interview_bot
         region: ${{ env.REGION }}
         project_id: ${{ env.PROJECT_ID }}
-        # GitHub Secrets로부터 환경 변수를 주입합니다.
-        env_vars: |
+        # GitHub Secrets로부터 환경 변수를 주입합니다. (v3 입력명: environment_variables)
+        environment_variables: |
           GITHUB_TOKEN=${{ secrets.CUSTOM_GITHUB_TOKEN }}
           REPO_OWNER=${{ github.repository_owner }}
           REPO_NAME=${{ github.event.repository.name }}
