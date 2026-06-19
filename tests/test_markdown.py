@@ -44,13 +44,16 @@ def test_next_question_ids_from_empty():
 
 def test_next_question_ids_only_scans_headers():
     # 본문/코드블록의 [Q999]는 무시, 헤더 라인만 스캔
-    readme = "## CS\n- **[Q005] Q. 질문** _(d)_\n  본문에 [Q999] 언급\n"
+    readme = "## CS\n- <details><summary><b>[Q005]</b> 질문 <i>(d)</i></summary>\n  본문에 [Q999] 언급\n"
     assert main.next_question_ids(readme, 1) == ["Q006"]
 
 
 def test_build_question_block_format():
-    block = main.build_question_block("Q016", "TCP 3-way handshake를 설명하라.", "2026-06-18")
-    assert "- **[Q016] Q. TCP 3-way handshake를 설명하라.** _(2026-06-18)_" in block
+    block = main.build_question_block(
+        "Q016", "TCP 3-way handshake", "TCP 3-way handshake를 설명하라.", "2026-06-18"
+    )
+    assert "<summary><b>[Q016]</b> TCP 3-way handshake <i>(2026-06-18)</i></summary>" in block
+    assert "**Q.** TCP 3-way handshake를 설명하라." in block
     assert "<details>" in block
     assert "### 🧑‍💻 나의 답변" in block
     assert "### 🤖 AI 피드백" in block
@@ -75,8 +78,8 @@ def test_find_unanswered_includes_question_text(sample_readme):
 
 def test_find_unanswered_excludes_ai_tagged():
     readme = (
-        "## CS\n- **[Q003] Q. 질문3** _(d)_\n  <details>\n"
-        "  <summary>s</summary>\n\n  ### 🧑‍💻 나의 답변\n"
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n"
         f"  {AI_TAG}\n  AI가 쓴 답.\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
     )
     # AI 태그가 있으면 미답변으로 보지 않음 (재처리 제외)
@@ -96,8 +99,8 @@ def test_update_answer_block_fills_and_returns_tuple(sample_readme):
 
 def test_update_answer_block_removes_ai_tag():
     readme = (
-        "## CS\n- **[Q003] Q. 질문3** _(d)_\n  <details>\n"
-        "  <summary>s</summary>\n\n  ### 🧑‍💻 나의 답변\n"
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n"
         f"  {main.AI_AUTO_TAG}\n  AI가 쓴 답.\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
     )
     new_content, _ = main.update_answer_block(readme, "Q003", "진짜 답변", "피드백")
@@ -113,29 +116,32 @@ def test_update_answer_block_missing_id_raises(sample_readme):
 
 def test_append_questions_assigns_ids_and_returns_them(sample_readme):
     questions = [
-        ("🖥️ CS (네트워크/OS)", "질문A"),
-        ("☕ Java", "질문B"),
+        ("🖥️ CS (네트워크/OS)", "제목A", "질문A"),
+        ("☕ Java", "제목B", "질문B"),
     ]
     new_content, assigned = main.append_questions(questions, sample_readme, date_str="2026-06-18")
     # sample 최대 Q002 → 다음 Q003, Q004
     assert assigned == ["Q003", "Q004"]
-    assert "[Q003] Q. 질문A" in new_content
-    assert "[Q004] Q. 질문B" in new_content
+    assert "<b>[Q003]</b> 제목A" in new_content
+    assert "**Q.** 질문A" in new_content
+    assert "<b>[Q004]</b> 제목B" in new_content
+    assert "**Q.** 질문B" in new_content
 
 
 def test_append_questions_creates_missing_section():
     readme = "# 제목\n## ☕ Java\n"
-    questions = [("🖥️ CS (네트워크/OS)", "새 CS 질문")]
+    questions = [("🖥️ CS (네트워크/OS)", "새 CS 제목", "새 CS 질문")]
     new_content, assigned = main.append_questions(questions, readme, date_str="2026-06-18")
     assert assigned == ["Q001"]
     assert "## 🖥️ CS (네트워크/OS)" in new_content
-    assert "[Q001] Q. 새 CS 질문" in new_content
+    assert "<b>[Q001]</b> 새 CS 제목" in new_content
+    assert "**Q.** 새 CS 질문" in new_content
 
 
 def test_append_questions_reapply_recomputes_ids():
     # 재적용(409) 시뮬레이션: 이미 Q003이 추가된 최신 content에 다시 append
-    readme = "## ☕ Java\n- **[Q003] Q. 기존** _(d)_\n  <details>\n  <summary>s</summary>\n\n  ### 🧑‍💻 나의 답변\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
-    questions = [("☕ Java", "질문B")]
+    readme = "## ☕ Java\n- <details><summary><b>[Q003]</b> 기존 <i>(d)</i></summary>\n\n  **Q.** 기존\n\n  ### 🧑‍💻 나의 답변\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    questions = [("☕ Java", "제목B", "질문B")]
     _, assigned = main.append_questions(questions, readme, date_str="2026-06-18")
     assert assigned == ["Q004"]  # 최신 기준 재계산
 

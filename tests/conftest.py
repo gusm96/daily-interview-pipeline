@@ -5,9 +5,9 @@ SAMPLE_README = """# daily-interview-pipeline
 
 ## 🖥️ CS (네트워크/OS)
 
-- **[Q001] Q. TCP와 UDP의 차이는?** _(2026-06-17)_
-  <details>
-  <summary>💡 나의 답변 및 AI 피드백 보기/접기</summary>
+- <details><summary><b>[Q001]</b> TCP와 UDP 차이 <i>(2026-06-17)</i></summary>
+
+  **Q.** TCP와 UDP의 차이는?
 
   ### 🧑‍💻 나의 답변
   TCP는 연결지향이고 UDP는 비연결입니다.
@@ -16,9 +16,9 @@ SAMPLE_README = """# daily-interview-pipeline
   좋은 답변입니다.
   </details>
 
-- **[Q002] Q. OSI 7계층을 설명하라.** _(2026-06-17)_
-  <details>
-  <summary>💡 나의 답변 및 AI 피드백 보기/접기</summary>
+- <details><summary><b>[Q002]</b> OSI 7계층 <i>(2026-06-17)</i></summary>
+
+  **Q.** OSI 7계층을 설명하라.
 
   ### 🧑‍💻 나의 답변
 
