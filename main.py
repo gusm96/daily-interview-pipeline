@@ -101,10 +101,13 @@ def update_answer_block(readme, qid, answer, feedback):
         r"### 🧑‍💻 나의 답변\n)(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*</details>)",
         re.DOTALL,
     )
-    # 각 줄마다 2칸씩 들여쓰기 적용 (내용이 있는 줄만 들여쓰기하여 불필요한 공백 방지)
-    indented_answer = "\n".join(f"  {line}" if line.strip() else "" for line in answer.splitlines())
-    indented_feedback = "\n".join(f"  {line}" if line.strip() else "" for line in feedback.splitlines())
+    # 각 줄마다 2칸씩 들여쓰기 적용 (빈 줄도 들여쓰기하여 마크다운 양식 일관성 유지)
+    indented_answer_lines = [f"  {line}" for line in answer.splitlines()]
+    indented_answer = "\n".join(indented_answer_lines) if indented_answer_lines else "  "
     new_answer = f"{indented_answer}\n"
+
+    indented_feedback_lines = [f"  {line}" for line in feedback.splitlines()]
+    indented_feedback = "\n".join(indented_feedback_lines) if indented_feedback_lines else "  "
     new_feedback = f"{indented_feedback}\n"
 
     def _repl(m):
