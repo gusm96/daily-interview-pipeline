@@ -163,6 +163,47 @@ def test_fill_unanswered_idempotent_skips_answered(sample_readme):
     assert "TCP는 연결지향이고" in new_content
 
 
+def test_update_answer_block_multiline():
+    readme = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    )
+    answer = "답변 라인1\n답변 라인2"
+    feedback = "피드백 라인1\n피드백 라인2"
+    new_content, _ = main.update_answer_block(readme, "Q003", answer, feedback)
+    expected = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n  답변 라인1\n  답변 라인2\n\n  ### 🤖 AI 피드백\n  피드백 라인1\n  피드백 라인2\n\n  </details>\n"
+    )
+    assert new_content == expected
+
+
+def test_update_answer_block_empty_and_blank_lines():
+    readme = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    )
+    # 1. Empty strings should yield two spaces indentation on the blank line
+    new_content, _ = main.update_answer_block(readme, "Q003", "", "")
+    expected_empty = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n  \n\n  ### 🤖 AI 피드백\n  \n\n  </details>\n"
+    )
+    assert new_content == expected_empty
+
+    # 2. Blank lines inside multiline strings should also be indented by 2 spaces
+    answer = "답변1\n\n답변2"
+    feedback = "피드백1\n\n피드백2"
+    new_content, _ = main.update_answer_block(readme, "Q003", answer, feedback)
+    expected_blank = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n  답변1\n  \n  답변2\n\n  ### 🤖 AI 피드백\n  피드백1\n  \n  피드백2\n\n  </details>\n"
+    )
+    assert new_content == expected_blank
+
+
+
+
 
 
 

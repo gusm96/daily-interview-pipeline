@@ -60,10 +60,14 @@ def next_question_ids(readme, count):
 def build_question_block(qid, title, question, date_str):
     """스펙 §7 접이식 질문 블록 마크다운 생성. 토글 요약엔 짧은 제목, 펼치면 전체 질문 + 답변/피드백 칸."""
     return (
-        f"- <details><summary><b>[{qid}]</b> {title} <i>({date_str})</i></summary>\n\n"
-        f"  **Q.** {question}\n\n"
-        f"  ### 🧑‍💻 나의 답변\n\n"
-        f"  ### 🤖 AI 피드백\n\n"
+        f"- <details><summary><b>[{qid}]</b> {title} <i>({date_str})</i></summary>\n"
+        f"  \n"
+        f"  **Q.** {question}\n"
+        f"  \n"
+        f"  ### 🧑‍💻 나의 답변\n"
+        f"  \n"
+        f"  ### 🤖 AI 피드백\n"
+        f"  \n"
         f"  </details>"
     )
 
@@ -97,8 +101,14 @@ def update_answer_block(readme, qid, answer, feedback):
         r"### 🧑‍💻 나의 답변\n)(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*</details>)",
         re.DOTALL,
     )
-    new_answer = f"  {answer}\n"
-    new_feedback = f"  {feedback}\n"
+    # 각 줄마다 2칸씩 들여쓰기 적용 (빈 줄도 들여쓰기하여 마크다운 양식 일관성 유지)
+    indented_answer_lines = [f"  {line}" for line in answer.splitlines()]
+    indented_answer = "\n".join(indented_answer_lines) if indented_answer_lines else "  "
+    new_answer = f"{indented_answer}\n"
+
+    indented_feedback_lines = [f"  {line}" for line in feedback.splitlines()]
+    indented_feedback = "\n".join(indented_feedback_lines) if indented_feedback_lines else "  "
+    new_feedback = f"{indented_feedback}\n"
 
     def _repl(m):
         return m.group(1) + new_answer + m.group(3) + new_feedback + m.group(5)
@@ -145,7 +155,7 @@ def fill_unanswered_questions(answer_map, readme):
     for qid in unanswered_ids:
         if qid not in answer_map:
             continue
-        tagged = f"{AI_AUTO_TAG}\n  {answer_map[qid]}"
+        tagged = f"{AI_AUTO_TAG}\n{answer_map[qid]}"
         content, _ = update_answer_block(content, qid, tagged, "(AI 자동 작성 - 검토 필요)")
         filled.append(qid)
     return content, sorted(filled)
