@@ -25,10 +25,11 @@ def test_validate_env_reports_missing(monkeypatch):
 
 def test_generate_questions_returns_category_tuples(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
-    fake = '[{"category":"🖥️ CS (네트워크/OS)","question":"Q1"},{"category":"☕ Java","question":"Q2"}]'
+    fake = ('[{"category":"🖥️ CS (네트워크/OS)","title":"T1","question":"Q1"},'
+            '{"category":"☕ Java","title":"T2","question":"Q2"}]')
     with patch("main.call_gemini", return_value=fake):
         result = main.generate_questions("기존 readme")
-    assert ("🖥️ CS (네트워크/OS)", "Q1") in result
+    assert ("🖥️ CS (네트워크/OS)", "T1", "Q1") in result
     assert len(result) == 2
 
 
@@ -42,7 +43,7 @@ def test_run_generate_routine_flow(monkeypatch, sample_readme):
     # Gemini 모범답안 + 질문 생성 모킹
     monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
     monkeypatch.setattr(main, "generate_questions",
-                        lambda r: [("☕ Java", "새 질문1"), ("🗄️ Database", "새 질문2")])
+                        lambda r: [("☕ Java", "제목1", "새 질문1"), ("🗄️ Database", "제목2", "새 질문2")])
 
     commits = []
 

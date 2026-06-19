@@ -46,8 +46,8 @@ def parse_question_id(text):
     return f"Q{m.group(1)}" if m else None
 
 
-# 질문 헤더 라인만 스캔 (M-2): "- **[Q###] ..." 형태만 매칭
-_HEADER_ID_RE = re.compile(r"^\s*-\s*\*\*\[Q(\d{3,})\]", re.MULTILINE)
+# 질문 헤더 라인만 스캔 (M-2): "- <details><summary><b>[Q###] ..." 형태만 매칭
+_HEADER_ID_RE = re.compile(r"^\s*-\s*<details><summary><b>\[Q(\d{3,})\]", re.MULTILINE)
 
 
 def next_question_ids(readme, count):
@@ -57,12 +57,11 @@ def next_question_ids(readme, count):
     return [f"Q{n:03d}" for n in range(start, start + count)]
 
 
-def build_question_block(qid, question, date_str):
-    """스펙 §7 접이식 질문 블록 마크다운 생성 (답변/피드백 칸 공백)."""
+def build_question_block(qid, title, question, date_str):
+    """스펙 §7 접이식 질문 블록 마크다운 생성. 토글 요약엔 짧은 제목, 펼치면 전체 질문 + 답변/피드백 칸."""
     return (
-        f"- **[{qid}] Q. {question}** _({date_str})_\n"
-        f"  <details>\n"
-        f"  <summary>💡 나의 답변 및 AI 피드백 보기/접기</summary>\n\n"
+        f"- <details><summary><b>[{qid}]</b> {title} <i>({date_str})</i></summary>\n\n"
+        f"  **Q.** {question}\n\n"
         f"  ### 🧑‍💻 나의 답변\n\n"
         f"  ### 🤖 AI 피드백\n\n"
         f"  </details>"
@@ -71,9 +70,9 @@ def build_question_block(qid, question, date_str):
 
 AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
 
-# 한 질문 블록 전체를 캡처: 헤더 + details 내부
+# 한 질문 블록 전체를 캡처: summary의 ID + details 내부의 전체 질문(**Q.**) + 답변 본문
 _BLOCK_RE = re.compile(
-    r"-\s*\*\*\[(Q\d{3,})\]\s*Q\.\s*(.*?)\*\*.*?"
+    r"<summary><b>\[(Q\d{3,})\]</b>.*?\*\*Q\.\*\*\s*(.*?)\s*"
     r"### 🧑‍💻 나의 답변\s*(.*?)\s*### 🤖 AI 피드백",
     re.DOTALL,
 )
@@ -94,7 +93,7 @@ def update_answer_block(readme, qid, answer, feedback):
     AI 자동 태그가 있으면 제거(C-3). 대상 미존재/치환 실패 시 ValueError(Mi-1)."""
     # 해당 qid 블록의 details 내부 구간만 치환
     block_pat = re.compile(
-        r"(-\s*\*\*\[" + re.escape(qid) + r"\]\s*Q\..*?"
+        r"(-\s*<details><summary><b>\[" + re.escape(qid) + r"\]</b>.*?"
         r"### 🧑‍💻 나의 답변\n)(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*</details>)",
         re.DOTALL,
     )
@@ -121,8 +120,8 @@ def append_questions(questions, readme, date_str=None):
     content = readme if readme.endswith("\n") else readme + "\n"
     ids = next_question_ids(content, len(questions))
 
-    for qid, (category, question) in zip(ids, questions):
-        block = build_question_block(qid, question, date_str)
+    for qid, (category, title, question) in zip(ids, questions):
+        block = build_question_block(qid, title, question, date_str)
         header = f"## {category}"
         if header in content:
             # 해당 카테고리 섹션 헤더 라인 바로 뒤에 삽입
@@ -313,17 +312,18 @@ def validate_env():
 
 def generate_questions(readme):
     """기존 README를 컨텍스트로 중복 없는 면접 질문 5개 생성.
-    [(category, question), ...] 반환. temperature=0.1 (정확도)."""
+    [(category, title, question), ...] 반환. temperature=0.1 (정확도)."""
     prompt = (
         "너는 백엔드 기술 면접관이다. 아래 기존 README의 질문들과 절대 중복되지 않는 "
         "한국어 백엔드 면접 질문 5개를 생성하라. 카테고리는 다음에서 골고루 분배: "
         f"{CATEGORIES}. Oracle Java/Spring Reference/AWS 가이드 기준으로 기술적으로 정확해야 한다.\n"
-        '출력은 순수 JSON 배열만: [{"category":"<카테고리>","question":"<질문>"}, ...]\n\n'
+        "각 질문에는 토글 목록에 표시할 5~10단어의 짧은 한국어 요약 제목(title)을 함께 만들어라.\n"
+        '출력은 순수 JSON 배열만: [{"category":"<카테고리>","title":"<짧은 제목>","question":"<질문>"}, ...]\n\n'
         f"=== 기존 README ===\n{readme}"
     )
     raw = call_gemini(prompt, temperature=0.1)
     items = json.loads(raw)
-    return [(it["category"], it["question"]) for it in items]
+    return [(it["category"], it["title"], it["question"]) for it in items]
 
 
 def run_generate_routine():
@@ -359,7 +359,7 @@ def run_generate_routine():
 
     # 4) Slack 전송 (확정 ID 사용)
     channel = os.environ.get("SLACK_CHANNEL_ID", "")
-    for qid, (category, question) in zip(assigned_ids, questions):
+    for qid, (category, title, question) in zip(assigned_ids, questions):
         try:
             slack_post_message(channel, f"*[{qid}] {category}*\n{question}")
         except Exception:
