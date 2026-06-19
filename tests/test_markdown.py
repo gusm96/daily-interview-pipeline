@@ -163,6 +163,22 @@ def test_fill_unanswered_idempotent_skips_answered(sample_readme):
     assert "TCP는 연결지향이고" in new_content
 
 
+def test_update_answer_block_multiline():
+    readme = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n\n  ### 🤖 AI 피드백\n\n  </details>\n"
+    )
+    answer = "답변 라인1\n답변 라인2"
+    feedback = "피드백 라인1\n피드백 라인2"
+    new_content, _ = main.update_answer_block(readme, "Q003", answer, feedback)
+    expected = (
+        "## CS\n- <details><summary><b>[Q003]</b> 질문3 <i>(d)</i></summary>\n\n"
+        "  **Q.** 질문3\n\n  ### 🧑‍💻 나의 답변\n  답변 라인1\n  답변 라인2\n\n  ### 🤖 AI 피드백\n  피드백 라인1\n  피드백 라인2\n\n  </details>\n"
+    )
+    assert new_content == expected
+
+
+
 
 
 
