@@ -49,6 +49,24 @@ def parse_question_id(text):
 # 질문 헤더 라인만 스캔 (M-2): "- <details><summary><b>[Q###] ..." 형태만 매칭
 _HEADER_ID_RE = re.compile(r"^\s*-\s*<details><summary><b>\[Q(\d{3,})\]", re.MULTILINE)
 
+_CONFIG_DEFAULT_RE = re.compile(r"<!--\s*config:default=(\d+)\s*-->")
+
+
+def get_config_default(readme):
+    """README의 config 마커에서 기본 생성 개수를 파싱. 없으면 5."""
+    m = _CONFIG_DEFAULT_RE.search(readme or "")
+    return int(m.group(1)) if m else 5
+
+
+def set_config_default(readme, n):
+    """config:default 마커를 갱신(없으면 README 상단에 삽입). (new_content, n) 반환.
+    github_commit_with_retry(lambda c: set_config_default(c, n))로 사용."""
+    marker = f"<!-- config:default={n} -->"
+    if _CONFIG_DEFAULT_RE.search(readme or ""):
+        return _CONFIG_DEFAULT_RE.sub(marker, readme), n
+    content = readme if readme.endswith("\n") else readme + "\n"
+    return marker + "\n" + content, n
+
 
 def next_question_ids(readme, count):
     """README의 질문 헤더 라인만 스캔해 최대 ID+1부터 count개 ID 반환."""
