@@ -269,4 +269,28 @@ def test_handle_app_mention_unknown(monkeypatch):
     assert "help" in posted[0]
 
 
+def test_entry_routes_app_mention(monkeypatch):
+    monkeypatch.setattr(main, "verify_slack_signature", lambda r: True)
+    called = []
+    monkeypatch.setattr(main, "handle_app_mention", lambda e: called.append("M"))
+    monkeypatch.setattr(main, "handle_slack_event", lambda p: called.append("B"))
+    req = FakeReq(json_data={"type": "event_callback",
+                             "event": {"type": "app_mention", "text": "<@UBOT> help"}})
+    body, status = main.daily_interview_bot(req)
+    assert status == 200
+    assert called == ["M"]  # 멘션은 handle_app_mention으로
+
+
+def test_entry_message_still_routes_to_slack_event(monkeypatch):
+    monkeypatch.setattr(main, "verify_slack_signature", lambda r: True)
+    called = []
+    monkeypatch.setattr(main, "handle_app_mention", lambda e: called.append("M"))
+    monkeypatch.setattr(main, "handle_slack_event", lambda p: called.append("B"))
+    req = FakeReq(json_data={"type": "event_callback",
+                             "event": {"type": "message", "text": "x"}})
+    body, status = main.daily_interview_bot(req)
+    assert status == 200
+    assert called == ["B"]  # 일반 메시지는 기존 경로 유지
+
+
 

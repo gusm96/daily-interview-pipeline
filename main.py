@@ -545,10 +545,14 @@ def daily_interview_bot(request):
         return (payload.get("challenge", ""), 200)
 
     if payload.get("type") == "event_callback":
+        event = payload.get("event", {})
         try:
-            handle_slack_event(payload)
+            if event.get("type") == "app_mention":
+                handle_app_mention(event)
+            else:
+                handle_slack_event(payload)
         except Exception:
-            logger.exception("루틴 B 실패")
+            logger.exception("이벤트 처리 실패")
         return ("OK", 200)
 
     return ("ignored", 200)
