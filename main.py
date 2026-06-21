@@ -370,12 +370,12 @@ def validate_env():
     return [k for k in REQUIRED_ENV if not os.environ.get(k)]
 
 
-def generate_questions(readme):
-    """기존 README를 컨텍스트로 중복 없는 면접 질문 5개 생성.
+def generate_questions(readme, count=5):
+    """기존 README를 컨텍스트로 중복 없는 면접 질문 count개 생성.
     [(category, title, question), ...] 반환. temperature=0.1 (정확도)."""
     prompt = (
         "너는 백엔드 기술 면접관이다. 아래 기존 README의 질문들과 절대 중복되지 않는 "
-        "한국어 백엔드 면접 질문 5개를 생성하라. 카테고리는 다음에서 골고루 분배: "
+        f"한국어 백엔드 면접 질문 {count}개를 생성하라. 카테고리는 다음에서 골고루 분배: "
         f"{CATEGORIES}. Oracle Java/Spring Reference/AWS 가이드 기준으로 기술적으로 정확해야 한다.\n"
         "각 질문에는 토글 목록에 표시할 5~10단어의 짧은 한국어 요약 제목(title)을 함께 만들어라.\n"
         '출력은 순수 JSON 배열만: [{"category":"<카테고리>","title":"<짧은 제목>","question":"<질문>"}, ...]\n\n'
@@ -407,9 +407,10 @@ def run_generate_routine():
             partial(fill_unanswered_questions, answer_map), "fill unanswered questions"
         )
 
-    # 2) 신규 질문 생성 (ID 미확정)
+    # 2) 신규 질문 생성 (ID 미확정, config default 개수 적용)
     content, _ = github_get_readme()
-    questions = generate_questions(content)
+    count = get_config_default(content)
+    questions = generate_questions(content, count)
 
     # 3) append 커밋 + 확정 ID 회수
     today = date.today().isoformat()

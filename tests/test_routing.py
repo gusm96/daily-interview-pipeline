@@ -43,7 +43,7 @@ def test_run_generate_routine_flow(monkeypatch, sample_readme):
     # Gemini 모범답안 + 질문 생성 모킹
     monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
     monkeypatch.setattr(main, "generate_questions",
-                        lambda r: [("☕ Java", "제목1", "새 질문1"), ("🗄️ Database", "제목2", "새 질문2")])
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1"), ("🗄️ Database", "제목2", "새 질문2")])
 
     commits = []
 
@@ -62,6 +62,26 @@ def test_run_generate_routine_flow(monkeypatch, sample_readme):
     # Slack에 질문 2개 개별 전송, ID 포함
     assert len(posted) == 2
     assert any("Q003" in t for t in posted)
+
+
+def test_run_generate_routine_uses_config_default(monkeypatch, sample_readme):
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    readme = "<!-- config:default=3 -->\n" + sample_readme
+    captured = {}
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
+
+    def fake_generate(r, count=5):
+        captured["count"] = count
+        return [("☕ Java", "t", "q")]
+
+    monkeypatch.setattr(main, "generate_questions", fake_generate)
+    monkeypatch.setattr(main, "github_get_readme", lambda: (readme, "sha"))
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: fn(readme))
+    main.run_generate_routine()
+    assert captured["count"] == 3
 
 
 def test_handle_slack_event_grades_and_commits(monkeypatch, sample_readme):
