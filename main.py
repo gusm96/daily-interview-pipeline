@@ -466,6 +466,58 @@ def handle_slack_event(payload):
         logger.exception("README 갱신 실패(불일치 가능): %s", qid)
 
 
+def handle_app_mention(event):
+    """app_mention 명령 처리: help/config/question/unknown 분기.
+    명령 경로는 자동 답변/채점(Gemini fill·grade)을 호출하지 않고 append만 한다."""
+    channel = event.get("channel", "")
+    thread_ts = event.get("thread_ts")  # 멘션이 스레드 내부면 그 스레드, 아니면 None(채널)
+    command, arg = parse_mention_command(
+        event.get("text", ""), os.environ.get("SLACK_BOT_USER_ID", "")
+    )
+
+    def reply(text):
+        slack_post_message(channel, text, thread_ts=thread_ts)
+
+    if command == "help":
+        reply(build_help_text())
+        return
+
+    if command == "config_show":
+        content, _ = github_get_readme()
+        reply(f"현재 기본 생성 개수: {get_config_default(content)}개")
+        return
+
+    if command == "config_set":
+        if arg is None or arg < 1 or arg > 10:
+            reply("기본 생성 개수는 1~10 사이로 입력해주세요. 예: `@봇 config --default=5`")
+            return
+        github_commit_with_retry(lambda c: set_config_default(c, arg), f"config default={arg}")
+        reply(f"기본 생성 개수가 {arg}개로 설정되었습니다.")
+        return
+
+    if command == "question":
+        content, _ = github_get_readme()
+        n = arg if arg is not None else get_config_default(content)
+        if n < 1 or n > 10:
+            reply("질문 개수는 1~10 사이로 입력해주세요. 예: `@봇 질문 3`")
+            return
+        questions = generate_questions(content, n)
+        today = date.today().isoformat()
+        _, assigned_ids = github_commit_with_retry(
+            partial(append_questions, questions, date_str=today), "add questions on demand"
+        )
+        # 질문은 채널 최상위로 전송 (루틴 B의 [Q###] 매핑 보존)
+        for qid, (category, title, question) in zip(assigned_ids, questions):
+            try:
+                slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
+            except Exception:
+                logger.exception("Slack 질문 전송 실패: %s", qid)
+        reply(f"질문 {len(assigned_ids)}개를 추가했습니다.")
+        return
+
+    reply("모르는 명령입니다. `@봇 help` 를 입력해 사용법을 확인하세요.")
+
+
 @functions_framework.http
 def daily_interview_bot(request):
     """통합 엔트리포인트. (body, status) 반환 (functions-framework 호환)."""

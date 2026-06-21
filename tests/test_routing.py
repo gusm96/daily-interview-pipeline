@@ -187,4 +187,86 @@ def test_entry_routes_event_callback(monkeypatch):
     assert called == ["B"]
 
 
+def test_handle_app_mention_help(monkeypatch):
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append((text, thread_ts)))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> help"})
+    assert posted and "명령어" in posted[0][0]
+
+
+def test_handle_app_mention_config_show(monkeypatch):
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(main, "github_get_readme",
+                        lambda: ("<!-- config:default=7 -->\n# r", "sha"))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config"})
+    assert "7" in posted[0]
+
+
+def test_handle_app_mention_config_set_commits(monkeypatch):
+    posted = []
+    commits = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: commits.append(msg) or fn("# r\n"))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config --default=4"})
+    assert commits  # 커밋 발생
+    assert "4" in posted[-1]
+
+
+def test_handle_app_mention_config_set_rejects_out_of_range(monkeypatch):
+    posted = []
+    called = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: called.append(1))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config --default=99"})
+    assert called == []  # 커밋 안 함
+    assert "1~10" in posted[0]
+
+
+def test_handle_app_mention_question_posts_top_level(monkeypatch):
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append((text, thread_ts)))
+    monkeypatch.setattr(main, "github_get_readme", lambda: ("# r\n", "sha"))
+    monkeypatch.setattr(main, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "t", "q")] * count)
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: ("new", ["Q010", "Q011"]))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> 질문 2", "thread_ts": "T1"})
+    # 질문 메시지는 thread_ts=None(최상위)으로 전송
+    q_msgs = [p for p in posted if p[0].startswith("*[Q")]
+    assert q_msgs and all(p[1] is None for p in q_msgs)
+    # 확인 메시지는 멘션 스레드(T1)로
+    assert any(p[1] == "T1" and "추가" in p[0] for p in posted)
+
+
+def test_handle_app_mention_question_does_not_call_grading(monkeypatch):
+    # 명령 경로는 절대 모범답안/채점을 호출하지 않는다
+    gemini_calls = []
+    monkeypatch.setattr(main, "call_gemini", lambda *a, **k: gemini_calls.append(1))
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(main, "github_get_readme", lambda: ("# r\n", "sha"))
+    monkeypatch.setattr(main, "generate_questions", lambda r, count=5: [("☕ Java", "t", "q")])
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: ("new", ["Q010"]))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> 질문 1"})
+    # find_unanswered/fill 경로를 타지 않으므로 call_gemini는 호출되지 않음
+    # (generate_questions를 모킹했으므로 내부 call_gemini도 없음)
+    assert gemini_calls == []
+
+
+def test_handle_app_mention_unknown(monkeypatch):
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> 안녕"})
+    assert "help" in posted[0]
+
+
 
