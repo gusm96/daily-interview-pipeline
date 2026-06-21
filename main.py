@@ -50,6 +50,9 @@ def parse_question_id(text):
 _HEADER_ID_RE = re.compile(r"^\s*-\s*<details><summary><b>\[Q(\d{3,})\]", re.MULTILINE)
 
 _CONFIG_DEFAULT_RE = re.compile(r"<!--\s*config:default=(\d+)\s*-->")
+_MENTION_TOKEN_RE = re.compile(r"<@[\w]+>")
+_CONFIG_SET_RE = re.compile(r"--default=(-?\d+)")
+_FIRST_INT_RE = re.compile(r"-?\d+")
 
 
 def get_config_default(readme):
@@ -66,6 +69,21 @@ def set_config_default(readme, n):
         return _CONFIG_DEFAULT_RE.sub(marker, readme), n
     content = readme if readme.endswith("\n") else readme + "\n"
     return marker + "\n" + content, n
+
+
+def parse_mention_command(text, bot_user_id=None):
+    """app_mention 텍스트를 파싱해 (command, arg) 반환. 범위 검증은 호출부 담당.
+    command: 'help' | 'config_set' | 'config_show' | 'question' | 'unknown'."""
+    body = _MENTION_TOKEN_RE.sub("", text or "").strip().lower()
+    if "help" in body:
+        return ("help", None)
+    if "config" in body:
+        m = _CONFIG_SET_RE.search(body)
+        return ("config_set", int(m.group(1))) if m else ("config_show", None)
+    if "질문" in body or "question" in body:
+        m = _FIRST_INT_RE.search(body)
+        return ("question", int(m.group(0)) if m else None)
+    return ("unknown", None)
 
 
 def next_question_ids(readme, count):
