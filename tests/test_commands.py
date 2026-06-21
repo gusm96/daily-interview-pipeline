@@ -32,3 +32,11 @@ def test_parse_negative_number_passed_through():
 
 def test_parse_unknown():
     assert main.parse_mention_command("<@UBOT> 안녕") == ("unknown", None)
+
+
+def test_build_help_text_lists_commands():
+    text = main.build_help_text()
+    assert "질문" in text
+    assert "config --default=" in text
+    assert "help" in text
+    assert "스레드" in text  # 답변 방법 안내 포함

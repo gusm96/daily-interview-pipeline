@@ -86,6 +86,20 @@ def parse_mention_command(text, bot_user_id=None):
     return ("unknown", None)
 
 
+def build_help_text():
+    """봇 사용법 안내 텍스트."""
+    return (
+        "🤖 *Daily Interview Bot 명령어*\n\n"
+        "• `@봇 질문` — 질문 추가 생성 (기본 N개)\n"
+        "• `@봇 질문 3` — 질문 3개 추가 생성 (1~10)\n"
+        "• `@봇 config` — 현재 기본 생성 개수 확인\n"
+        "• `@봇 config --default=5` — 기본 생성 개수 설정 (매일 자동 생성 수에도 적용)\n"
+        "• `@봇 help` — 이 도움말\n\n"
+        "💬 *답변 방법*: 봇이 보낸 질문 메시지에 *스레드 답글*로 답하면 AI가 채점·피드백합니다.\n"
+        "ℹ️ 답변하지 않은 질문은 다음 날 오전 7시에 AI 모범답안이 자동 작성됩니다."
+    )
+
+
 def next_question_ids(readme, count):
     """README의 질문 헤더 라인만 스캔해 최대 ID+1부터 count개 ID 반환."""
     nums = [int(n) for n in _HEADER_ID_RE.findall(readme or "")]
