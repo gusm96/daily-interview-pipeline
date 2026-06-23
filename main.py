@@ -529,6 +529,15 @@ def daily_interview_bot(request):
             return ("OK: questions generated", 200)
         except Exception:
             logger.exception("루틴 A 실패")
+            try:
+                channel = os.environ.get("SLACK_CHANNEL_ID", "")
+                if channel:
+                    slack_post_message(
+                        channel,
+                        "⚠️ 오전 질문 자동 생성(루틴 A)이 실패했습니다. 함수 로그를 확인해주세요.",
+                    )
+            except Exception:
+                logger.exception("루틴 A 실패 알림 전송 실패")
             return ("error", 500)
 
     # 슬랙 경로: 서명검증 우선 (C-1)

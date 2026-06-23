@@ -293,4 +293,17 @@ def test_entry_message_still_routes_to_slack_event(monkeypatch):
     assert called == ["B"]  # 일반 메시지는 기존 경로 유지
 
 
+def test_entry_routine_a_failure_notifies_slack(monkeypatch):
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    monkeypatch.setattr(main, "run_generate_routine",
+                        lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append((ch, text)))
+    req = FakeReq(args={"action": "generate"})
+    body, status = main.daily_interview_bot(req)
+    assert status == 500
+    assert posted and posted[0][0] == "C1" and "실패" in posted[0][1]
+
+
 
