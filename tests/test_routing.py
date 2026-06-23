@@ -316,4 +316,25 @@ def test_handle_app_mention_ignores_bot(monkeypatch):
     assert posted == []
 
 
+def test_run_generate_routine_clamps_out_of_range_default(monkeypatch, sample_readme):
+    # 마커가 범위를 벗어나면(50) 생성 개수는 10으로 클램프
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    readme = "<!-- config:default=50 -->\n" + sample_readme
+    captured = {}
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
+
+    def fake_generate(r, count=5):
+        captured["count"] = count
+        return [("☕ Java", "t", "q")]
+
+    monkeypatch.setattr(main, "generate_questions", fake_generate)
+    monkeypatch.setattr(main, "github_get_readme", lambda: (readme, "sha"))
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: fn(readme))
+    main.run_generate_routine()
+    assert captured["count"] == 10
+
+
 

@@ -411,9 +411,9 @@ def run_generate_routine():
             partial(fill_unanswered_questions, answer_map), "fill unanswered questions"
         )
 
-    # 2) 신규 질문 생성 (ID 미확정, config default 개수 적용)
+    # 2) 신규 질문 생성 (ID 미확정, config default 개수 적용; 1~10 클램프 R-4)
     content, _ = github_get_readme()
-    count = get_config_default(content)
+    count = max(1, min(10, get_config_default(content)))
     questions = generate_questions(content, count)
 
     # 3) append 커밋 + 확정 ID 회수
