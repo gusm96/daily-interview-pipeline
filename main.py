@@ -473,6 +473,8 @@ def handle_slack_event(payload):
 def handle_app_mention(event):
     """app_mention 명령 처리: help/config/question/unknown 분기.
     명령 경로는 자동 답변/채점(Gemini fill·grade)을 호출하지 않고 append만 한다."""
+    if is_bot_or_self(event):  # 봇/시스템/자기 멘션은 무시(루프 방지, R-3)
+        return
     channel = event.get("channel", "")
     thread_ts = event.get("thread_ts")  # 멘션이 스레드 내부면 그 스레드, 아니면 None(채널)
     command, arg = parse_mention_command(

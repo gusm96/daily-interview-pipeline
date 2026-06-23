@@ -306,4 +306,14 @@ def test_entry_routine_a_failure_notifies_slack(monkeypatch):
     assert posted and posted[0][0] == "C1" and "실패" in posted[0][1]
 
 
+def test_handle_app_mention_ignores_bot(monkeypatch):
+    # 봇/자기 메시지로 들어온 멘션 이벤트는 아무것도 처리하지 않음
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    main.handle_app_mention({"channel": "C1", "user": "UBOT", "text": "<@UBOT> help"})
+    assert posted == []
+
+
 
