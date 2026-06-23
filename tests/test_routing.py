@@ -337,4 +337,75 @@ def test_run_generate_routine_clamps_out_of_range_default(monkeypatch, sample_re
     assert captured["count"] == 10
 
 
+def test_is_authorized_user_no_restriction_when_unset(monkeypatch):
+    monkeypatch.delenv("SLACK_ALLOWED_USER_IDS", raising=False)
+    assert main.is_authorized_user({"user": "UANY"}) is True
+
+
+def test_is_authorized_user_enforces_whitelist(monkeypatch):
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "UADMIN, UOWNER")
+    assert main.is_authorized_user({"user": "UADMIN"}) is True
+    assert main.is_authorized_user({"user": "UHACKER"}) is False
+
+
+def test_handle_app_mention_question_blocked_for_unauthorized(monkeypatch):
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "UADMIN")
+    posted = []
+    called = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(main, "generate_questions",
+                        lambda r, count=5: called.append(1) or [])
+    main.handle_app_mention({"channel": "C1", "user": "UHACKER", "text": "<@UBOT> 질문 3"})
+    assert called == []        # 생성 시도조차 하지 않음
+    assert "권한" in posted[0]
+
+
+def test_handle_app_mention_config_set_blocked_for_unauthorized(monkeypatch):
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "UADMIN")
+    posted = []
+    commits = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: commits.append(msg))
+    main.handle_app_mention({"channel": "C1", "user": "UHACKER",
+                             "text": "<@UBOT> config --default=4"})
+    assert commits == []       # 커밋 안 함
+    assert "권한" in posted[0]
+
+
+def test_handle_app_mention_help_blocked_for_unauthorized(monkeypatch):
+    # 전체 잠금: 읽기/도움말도 비등록 사용자에겐 거부
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "UADMIN")
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    main.handle_app_mention({"channel": "C1", "user": "UHACKER", "text": "<@UBOT> help"})
+    assert "권한" in posted[0]   # 도움말 대신 권한 안내
+
+
+def test_handle_app_mention_question_allowed_for_authorized(monkeypatch):
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "UADMIN")
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(main, "github_get_readme", lambda: ("# r\n", "sha"))
+    seen = []
+    monkeypatch.setattr(main, "generate_questions",
+                        lambda r, count=5: seen.append(count) or [("☕ Java", "t", "q")])
+    monkeypatch.setattr(main, "github_commit_with_retry",
+                        lambda fn, msg, max_retries=3: ("new", ["Q010"]))
+    main.handle_app_mention({"channel": "C1", "user": "UADMIN", "text": "<@UBOT> 질문 1"})
+    assert seen == [1]
+
+
+def test_handle_app_mention_help_allowed_for_authorized(monkeypatch):
+    # 등록 사용자는 help 정상 동작
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "UADMIN")
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    main.handle_app_mention({"channel": "C1", "user": "UADMIN", "text": "<@UBOT> help"})
+    assert "명령어" in posted[0]
+
+
 

@@ -470,6 +470,16 @@ def handle_slack_event(payload):
         logger.exception("README 갱신 실패(불일치 가능): %s", qid)
 
 
+def is_authorized_user(event):
+    """SLACK_ALLOWED_USER_IDS(쉼표 구분)가 설정돼 있으면 해당 사용자만 쓰기/생성 명령 허용.
+    미설정이면 제한 없음(기존 단일 사용자 동작 유지, R-2)."""
+    allowed = os.environ.get("SLACK_ALLOWED_USER_IDS", "").strip()
+    if not allowed:
+        return True
+    ids = {x.strip() for x in allowed.split(",") if x.strip()}
+    return event.get("user", "") in ids
+
+
 def handle_app_mention(event):
     """app_mention 명령 처리: help/config/question/unknown 분기.
     명령 경로는 자동 답변/채점(Gemini fill·grade)을 호출하지 않고 append만 한다."""
@@ -483,6 +493,11 @@ def handle_app_mention(event):
 
     def reply(text):
         slack_post_message(channel, text, thread_ts=thread_ts)
+
+    # 전체 잠금: 화이트리스트 설정 시 등록 사용자만 모든 멘션 명령 허용(R-2)
+    if not is_authorized_user(event):
+        reply("이 명령을 실행할 권한이 없습니다. 관리자에게 문의하세요.")
+        return
 
     if command == "help":
         reply(build_help_text())

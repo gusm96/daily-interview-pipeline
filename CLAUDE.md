@@ -21,7 +21,9 @@
 ## 환경 변수
 
 `GITHUB_TOKEN`, `REPO_OWNER`, `REPO_NAME`, `GEMINI_API_KEY`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`
-(선택: `GEMINI_MODEL`, `SLACK_CHANNEL_ID`)
+(선택: `GEMINI_MODEL`, `SLACK_CHANNEL_ID`, `SLACK_ALLOWED_USER_IDS`)
+
+- `SLACK_ALLOWED_USER_IDS`: 쉼표 구분 사용자 ID 화이트리스트. 설정 시 **모든 멘션 명령**(help 포함)을 해당 사용자만 실행. 미설정이면 제한 없음.
 
 ## 설계 명세서
 
