@@ -89,3 +89,17 @@ def test_slack_get_thread_parent_returns_text(monkeypatch):
     assert text == "부모 [Q016] 질문"
 
 
+def test_extract_user_answer_ignores_bot_mention(monkeypatch):
+    # 스레드 안에서 봇을 멘션한 메시지는 명령 경로가 처리 → 채점 대상 아님
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    event = {"user": "UHUMAN", "text": "<@UBOT> help", "thread_ts": "1", "ts": "2"}
+    assert main.extract_user_answer(event) is None
+
+
+def test_extract_user_answer_keeps_plain_thread_reply(monkeypatch):
+    # 멘션 없는 일반 스레드 답글은 그대로 답변으로 인정(회귀 방지)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    event = {"user": "UHUMAN", "text": "내 답변", "thread_ts": "1", "ts": "2"}
+    assert main.extract_user_answer(event) == "내 답변"
+
+

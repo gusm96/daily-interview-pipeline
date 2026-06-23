@@ -241,12 +241,16 @@ def is_bot_or_self(event):
 
 def extract_user_answer(event):
     """스레드 답변인 순수 사용자 텍스트 반환. 무시 대상이면 None.
-    thread_ts 없는 최상위 메시지도 무시(이 함수가 thread_ts 판정 담당)."""
+    thread_ts 없는 최상위 메시지도 무시(이 함수가 thread_ts 판정 담당).
+    봇 멘션 메시지는 명령 경로(handle_app_mention)가 처리하므로 채점 제외(R-1)."""
     if is_bot_or_self(event):
         return None
     if not event.get("thread_ts"):
         return None
     text = (event.get("text") or "").strip()
+    bot_user = os.environ.get("SLACK_BOT_USER_ID", "")
+    if bot_user and f"<@{bot_user}>" in text:
+        return None
     return text or None
 
 
