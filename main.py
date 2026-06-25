@@ -256,6 +256,33 @@ def extract_user_answer(event):
 
 logger = logging.getLogger("daily_interview_bot")
 
+
+# 트랜션트 네트워크 장애(SSL 핸드셰이크 끊김/연결 실패/타임아웃)는 재시도로 흡수.
+# api.github.com·Gemini 호출 중 일시적 SSLEOFError로 루틴 A가 통째로 죽는 사례 대응.
+_NETWORK_RETRY_EXCEPTIONS = (
+    requests.exceptions.SSLError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+)
+
+
+def _request_with_retry(fn, max_attempts=3):
+    """fn()을 호출하되 트랜션트 네트워크 예외만 지수 백오프로 재시도한다.
+    재시도 소진 시 마지막 예외를 그대로 올린다. 비네트워크 예외는 즉시 전파."""
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except _NETWORK_RETRY_EXCEPTIONS as e:
+            last_exc = e
+            logger.warning(
+                "네트워크 오류 재시도 %d/%d: %s", attempt + 1, max_attempts, e
+            )
+            if attempt < max_attempts - 1:
+                time.sleep(2 ** attempt)
+    raise last_exc
+
+
 GEMINI_TIMEOUT = 30  # 초 (§8.5). 루틴 A는 Scheduler 호출이라 3초 제약 없음. 2.5-flash 지연 여유.
 
 
@@ -273,7 +300,9 @@ def call_gemini(prompt, temperature):
             "thinkingConfig": {"thinkingBudget": 0},
         },
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=GEMINI_TIMEOUT)
+    resp = _request_with_retry(
+        lambda: requests.post(url, headers=headers, json=payload, timeout=GEMINI_TIMEOUT)
+    )
     if not resp.ok:
         logger.error("Gemini API 실패: status=%s", resp.status_code)
         resp.raise_for_status()
@@ -294,6 +323,7 @@ def _github_headers():
     return {
         "Authorization": f"Bearer {os.environ.get('GITHUB_TOKEN', '')}",
         "Accept": "application/vnd.github+json",
+        "User-Agent": "daily-interview-pipeline-bot",
     }
 
 
@@ -305,7 +335,9 @@ def _readme_url():
 
 def github_get_readme():
     """README content(디코딩) + sha 반환."""
-    resp = requests.get(_readme_url(), headers=_github_headers(), timeout=10)
+    resp = _request_with_retry(
+        lambda: requests.get(_readme_url(), headers=_github_headers(), timeout=10)
+    )
     if not resp.ok:
         raise GitHubError(f"README 조회 실패: {resp.status_code}")
     data = resp.json()
@@ -324,7 +356,11 @@ def github_commit_with_retry(mutate_fn, message, max_retries=3):
             "content": base64.b64encode(new_content.encode("utf-8")).decode(),
             "sha": sha,
         }
-        resp = requests.put(_readme_url(), headers=_github_headers(), json=payload, timeout=10)
+        resp = _request_with_retry(
+            lambda: requests.put(
+                _readme_url(), headers=_github_headers(), json=payload, timeout=10
+            )
+        )
         if resp.ok:
             logger.info("GitHub 커밋 성공: %s", message)
             return new_content, result
