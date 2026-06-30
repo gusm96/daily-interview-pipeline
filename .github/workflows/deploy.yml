@@ -64,6 +64,7 @@ jobs:
       uses: google-github-actions/deploy-cloud-functions@v3
       with:
         name: ${{ env.SERVICE_NAME }}
+        service_timeout: 300s
 
         runtime: python311
         entry_point: daily_interview_bot

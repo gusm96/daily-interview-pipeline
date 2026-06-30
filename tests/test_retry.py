@@ -71,3 +71,32 @@ def test_github_get_readme_retries_on_ssl_error(monkeypatch):
 
     assert content == "# Hello"
     assert sha == "sha1"
+
+
+def test_request_with_retry_default_rides_out_extended_ssl_blip(monkeypatch):
+    """기본 재시도 횟수가 늘어 더 긴 SSL 블립(연속 4회)을 견딘다(6/29 GitHub 블립 대응)."""
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+    attempts = {"n": 0}
+
+    def fn():
+        attempts["n"] += 1
+        if attempts["n"] < 5:
+            raise requests.exceptions.SSLError("eof")
+        return type("R", (), {"status_code": 200, "ok": True})()
+
+    resp = main._request_with_retry(fn)  # 기본 max_attempts 사용
+    assert resp.status_code == 200
+    assert attempts["n"] == 5
+
+
+def test_request_with_retry_retries_on_503_then_succeeds(monkeypatch):
+    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
+    seq = [type("R", (), {"status_code": 503, "ok": False})(),
+           type("R", (), {"status_code": 200, "ok": True})()]
+    calls = {"n": 0}
+
+    def fn():
+        r = seq[calls["n"]]; calls["n"] += 1; return r
+
+    resp = main._request_with_retry(fn, max_attempts=3)
+    assert resp.status_code == 200 and calls["n"] == 2

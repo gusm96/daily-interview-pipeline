@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch, MagicMock
 import main
 
@@ -50,3 +51,17 @@ def test_call_gemini_default_model_is_supported(monkeypatch):
     main.call_gemini("프롬프트", temperature=0.1)
     assert "gemini-2.0-flash" not in captured["url"]
     assert "gemini-2.5-flash" in captured["url"]
+
+
+def test_call_gemini_raises_clear_error_on_empty_candidates(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+
+    class FakeResp:
+        ok = True; status_code = 200
+        def json(self):
+            return {"candidates": [], "promptFeedback": {"blockReason": "SAFETY"}}
+
+    monkeypatch.setattr(main.requests, "post", lambda *a, **k: FakeResp())
+    with pytest.raises(main.GeminiError):
+        main.call_gemini("프롬프트", temperature=0.1)
+
