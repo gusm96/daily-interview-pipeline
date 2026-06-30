@@ -408,4 +408,34 @@ def test_handle_app_mention_help_allowed_for_authorized(monkeypatch):
     assert "명령어" in posted[0]
 
 
+def test_today_kst_iso_at_0700_kst_returns_same_kst_day(monkeypatch):
+    # 2026-06-29 22:30 UTC == 2026-06-30 07:30 KST → 날짜는 06-30 이어야 한다(전날 아님)
+    fixed = main.datetime(2026, 6, 30, 7, 30, tzinfo=main.KST)
+    monkeypatch.setattr(main, "_now_kst", lambda: fixed)
+    assert main.today_kst_iso() == "2026-06-30"
 
+
+def test_append_questions_default_date_uses_kst(monkeypatch):
+    fixed = main.datetime(2026, 6, 30, 7, 30, tzinfo=main.KST)
+    monkeypatch.setattr(main, "_now_kst", lambda: fixed)
+    new_content, ids = main.append_questions([("CS", "제목", "질문 본문")], "## CS\n\n")
+    assert "(2026-06-30)" in new_content
+
+
+def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
+    # 미답변이 많아도 한 번에 최대 _MAX_FILL_PER_RUN개만 모범답안 생성
+    many = [(f"Q{i:03d}", f"질문{i}") for i in range(1, 30)]
+    monkeypatch.setattr(main, "validate_env", lambda: [])
+    monkeypatch.setattr(main, "github_get_readme", lambda: ("README", "sha"))
+    monkeypatch.setattr(main, "find_unanswered_questions", lambda c: many)
+    monkeypatch.setattr(main, "get_config_default", lambda c: 1)
+    monkeypatch.setattr(main, "generate_questions", lambda c, n: [("CS", "t", "q")])
+    monkeypatch.setattr(main, "github_commit_with_retry", lambda fn, msg: ("README", ["Q100"]))
+    monkeypatch.setattr(main, "slack_post_message", lambda *a, **k: None)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    calls = {"n": 0}
+    monkeypatch.setattr(main, "call_gemini",
+                        lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
+
+    main.run_generate_routine()
+    assert calls["n"] == main._MAX_FILL_PER_RUN  # generate_questions는 대체됨 → fill 호출만 집계

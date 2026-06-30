@@ -1,5 +1,5 @@
 import base64
-from datetime import date
+from datetime import datetime, timedelta, timezone
 import functions_framework
 import hashlib
 import hmac
@@ -174,8 +174,7 @@ def append_questions(questions, readme, date_str=None):
     ID를 재할당해 카테고리 섹션 아래 append. (new_content, 할당된 ID 목록) 반환 (C-1).
     카테고리 섹션이 없으면 생성 (Mi-4/S-5)."""
     if date_str is None:
-        from datetime import date
-        date_str = date.today().isoformat()
+        date_str = today_kst_iso()
 
     content = readme if readme.endswith("\n") else readme + "\n"
     ids = next_question_ids(content, len(questions))
@@ -257,6 +256,21 @@ def extract_user_answer(event):
 logger = logging.getLogger("daily_interview_bot")
 
 
+# Cloud Functions 런타임은 UTC라 date.today()를 쓰면 07:00 KST 실행이 전날로 찍히는
+# off-by-one을 유발한다(2026-06-30 관측). KST는 DST가 없어 고정 오프셋 +9로 다룬다.
+KST = timezone(timedelta(hours=9))
+
+
+def _now_kst():
+    """현재 시각(KST). 테스트에서 monkeypatch로 시점을 고정하는 seam."""
+    return datetime.now(KST)
+
+
+def today_kst_iso():
+    """KST(Asia/Seoul) 기준 오늘 날짜 ISO 문자열(YYYY-MM-DD)."""
+    return _now_kst().date().isoformat()
+
+
 # 트랜션트 네트워크 장애(SSL 핸드셰이크 끊김/연결 실패/타임아웃)는 재시도로 흡수.
 # api.github.com·Gemini 호출 중 일시적 SSLEOFError로 루틴 A가 통째로 죽는 사례 대응.
 _NETWORK_RETRY_EXCEPTIONS = (
@@ -266,20 +280,33 @@ _NETWORK_RETRY_EXCEPTIONS = (
 )
 
 
-def _request_with_retry(fn, max_attempts=3):
-    """fn()을 호출하되 트랜션트 네트워크 예외만 지수 백오프로 재시도한다.
-    재시도 소진 시 마지막 예외를 그대로 올린다. 비네트워크 예외는 즉시 전파."""
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_RETRY_MAX_ATTEMPTS = 5      # 6/29 GitHub SSL 블립(~30s)을 견디도록 3→5
+_RETRY_BACKOFF_CAP = 8       # 초. 지수 백오프 상한(폭주 방지)
+
+
+def _request_with_retry(fn, max_attempts=_RETRY_MAX_ATTEMPTS, retry_statuses=_RETRYABLE_STATUS):
+    """fn()을 호출. 트랜션트 네트워크 예외 또는 재시도 가능 HTTP 상태(429/5xx)면
+    상한 있는 지수 백오프로 재시도. 소진 시 마지막 응답 반환 또는 마지막 네트워크 예외 전파."""
     last_exc = None
     for attempt in range(max_attempts):
         try:
-            return fn()
+            resp = fn()
         except _NETWORK_RETRY_EXCEPTIONS as e:
             last_exc = e
-            logger.warning(
-                "네트워크 오류 재시도 %d/%d: %s", attempt + 1, max_attempts, e
-            )
+            logger.warning("네트워크 오류 재시도 %d/%d: %s", attempt + 1, max_attempts, e)
             if attempt < max_attempts - 1:
-                time.sleep(2 ** attempt)
+                time.sleep(min(2 ** attempt, _RETRY_BACKOFF_CAP))
+            continue
+        if (
+            retry_statuses
+            and getattr(resp, "status_code", None) in retry_statuses
+            and attempt < max_attempts - 1
+        ):
+            logger.warning("HTTP %s 재시도 %d/%d", resp.status_code, attempt + 1, max_attempts)
+            time.sleep(min(2 ** attempt, _RETRY_BACKOFF_CAP))
+            continue
+        return resp
     raise last_exc
 
 
@@ -307,12 +334,22 @@ def call_gemini(prompt, temperature):
         logger.error("Gemini API 실패: status=%s", resp.status_code)
         resp.raise_for_status()
     data = resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise GeminiError(f"Gemini 후보 없음 (promptFeedback={data.get('promptFeedback', {})})")
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    if not parts or "text" not in parts[0]:
+        raise GeminiError(f"Gemini 응답에 text 없음 (finishReason={candidates[0].get('finishReason')})")
+    text = parts[0]["text"]
     logger.info("Gemini 호출 성공 (model=%s)", model)
     return strip_markdown_fence(text)
 
 
 GITHUB_API = "https://api.github.com"
+
+
+class GeminiError(Exception):
+    pass
 
 
 class GitHubError(Exception):
@@ -426,6 +463,9 @@ def generate_questions(readme, count=5):
     return [(it["category"], it["title"], it["question"]) for it in items]
 
 
+_MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차 Gemini 누적→타임아웃 방지)
+
+
 def run_generate_routine():
     """루틴 A: 미답변 자동 채움 → 신규 질문 생성/커밋 → Slack 전송."""
     missing = validate_env()
@@ -438,7 +478,7 @@ def run_generate_routine():
     unanswered = find_unanswered_questions(content)
     if unanswered:
         answer_map = {}
-        for qid, question in unanswered:
+        for qid, question in unanswered[:_MAX_FILL_PER_RUN]:
             answer_map[qid] = call_gemini(
                 f"다음 백엔드 면접 질문의 모범답안을 한국어로 간결히 작성하라.\n질문: {question}",
                 temperature=0.1,
@@ -453,7 +493,7 @@ def run_generate_routine():
     questions = generate_questions(content, count)
 
     # 3) append 커밋 + 확정 ID 회수
-    today = date.today().isoformat()
+    today = today_kst_iso()
     _, assigned_ids = github_commit_with_retry(
         partial(append_questions, questions, date_str=today), "add daily questions"
     )
@@ -559,7 +599,7 @@ def handle_app_mention(event):
             reply("질문 개수는 1~10 사이로 입력해주세요. 예: `@봇 질문 3`")
             return
         questions = generate_questions(content, n)
-        today = date.today().isoformat()
+        today = today_kst_iso()
         _, assigned_ids = github_commit_with_retry(
             partial(append_questions, questions, date_str=today), "add questions on demand"
         )
