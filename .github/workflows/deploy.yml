@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
 
 env:
   PROJECT_ID: "${{ secrets.GCP_PROJECT_ID }}" # GCP 프로젝트 ID를 GitHub Secrets에서 불러와 사용합니다.
