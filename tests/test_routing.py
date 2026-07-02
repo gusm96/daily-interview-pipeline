@@ -33,6 +33,15 @@ def test_generate_questions_returns_category_tuples(monkeypatch):
     assert len(result) == 2
 
 
+def test_generate_questions_passes_category_enum_schema(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    fake = '[{"category":"☕ Java","title":"T1","question":"Q1"}]'
+    with patch("main.call_gemini", return_value=fake) as m:
+        main.generate_questions("기존 readme")
+    schema = m.call_args.kwargs["response_schema"]
+    assert schema["items"]["properties"]["category"]["enum"] == main.CATEGORIES
+
+
 def test_run_generate_routine_flow(monkeypatch, sample_readme):
     for k in REQUIRED:
         monkeypatch.setenv(k, "x")
@@ -93,7 +102,10 @@ def test_handle_slack_event_grades_and_commits(monkeypatch, sample_readme):
                         lambda ch, text, thread_ts=None: posted.append((text, thread_ts)))
     monkeypatch.setattr(main, "slack_get_thread_parent",
                         lambda ch, ts: "오늘의 질문 [Q002] OSI 7계층")
-    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "좋은 답변입니다")
+    monkeypatch.setattr(
+        main, "call_gemini",
+        lambda p, temperature, response_schema=None, thinking_budget=0: "좋은 답변입니다",
+    )
 
     committed = {}
 
@@ -116,6 +128,38 @@ def test_handle_slack_event_grades_and_commits(monkeypatch, sample_readme):
     # README Q002 갱신 커밋
     assert "OSI는 7계층입니다" in committed["content"]
     assert "좋은 답변입니다" in committed["content"]
+
+
+def test_handle_slack_event_passes_question_and_thinking_budget(monkeypatch, sample_readme):
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(
+        main, "slack_get_thread_parent",
+        lambda ch, ts: "*[Q002] 🖥️ CS (네트워크/OS) | OSI 7계층*\nOSI 7계층을 설명하라.",
+    )
+    captured = {}
+
+    def fake_call_gemini(prompt, temperature, response_schema=None, thinking_budget=0):
+        captured["prompt"] = prompt
+        captured["thinking_budget"] = thinking_budget
+        return "좋은 답변입니다"
+
+    monkeypatch.setattr(main, "call_gemini", fake_call_gemini)
+    monkeypatch.setattr(
+        main, "github_commit_with_retry",
+        lambda mutate_fn, message, max_retries=3: mutate_fn(sample_readme),
+    )
+
+    payload = {"event": {
+        "type": "message", "user": "UHUMAN", "text": "OSI는 7계층입니다",
+        "thread_ts": "111.1", "ts": "111.2", "channel": "C1",
+    }}
+    main.handle_slack_event(payload)
+
+    assert "OSI 7계층을 설명하라." in captured["prompt"]
+    assert "OSI는 7계층입니다" in captured["prompt"]
+    assert captured["thinking_budget"] == main.FEEDBACK_THINKING_BUDGET
 
 
 def test_handle_slack_event_ignores_bot(monkeypatch):
@@ -439,3 +483,9 @@ def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
 
     main.run_generate_routine()
     assert calls["n"] == main._MAX_FILL_PER_RUN  # generate_questions는 대체됨 → fill 호출만 집계
+
+
+def test_model_answer_prompt_has_question_placeholder():
+    from prompts import MODEL_ANSWER_PROMPT
+    rendered = MODEL_ANSWER_PROMPT.format(question="테스트 질문")
+    assert "테스트 질문" in rendered

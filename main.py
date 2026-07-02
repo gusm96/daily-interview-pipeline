@@ -11,6 +11,7 @@ import re
 import requests
 import time
 from slack_sdk import WebClient
+from prompts import CATEGORIES, QUESTION_GENERATION_PROMPT, MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
 
 
 
@@ -311,21 +312,27 @@ def _request_with_retry(fn, max_attempts=_RETRY_MAX_ATTEMPTS, retry_statuses=_RE
 
 
 GEMINI_TIMEOUT = 30  # 초 (§8.5). 루틴 A는 Scheduler 호출이라 3초 제약 없음. 2.5-flash 지연 여유.
+FEEDBACK_THINKING_BUDGET = 1024  # 채점 품질 개선용. 비용 영향 미미(건당 출력 토큰 소량 증가).
 
 
-def call_gemini(prompt, temperature):
-    """Gemini generateContent REST 호출 → 텍스트 추출 → 펜스 제거."""
+def call_gemini(prompt, temperature, response_schema=None, thinking_budget=0):
+    """Gemini generateContent REST 호출 → 텍스트 추출 → 펜스 제거.
+    response_schema 지정 시 구조화 JSON 출력을 강제(responseMimeType+responseSchema).
+    thinking_budget으로 thinkingConfig.thinkingBudget 조절(기본 0, 지연·비용 절감)."""
     model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
     api_key = os.environ.get("GEMINI_API_KEY", "")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+    generation_config = {
+        "temperature": temperature,
+        "thinkingConfig": {"thinkingBudget": thinking_budget},
+    }
+    if response_schema is not None:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseSchema"] = response_schema
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            # 2.5-flash 기본 thinking 비활성화 → 지연·비용 절감 (질문 생성/채점엔 충분)
-            "thinkingConfig": {"thinkingBudget": 0},
-        },
+        "generationConfig": generation_config,
     }
     resp = _request_with_retry(
         lambda: requests.post(url, headers=headers, json=payload, timeout=GEMINI_TIMEOUT)
@@ -436,29 +443,35 @@ REQUIRED_ENV = [
     "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET", "SLACK_CHANNEL_ID", "SLACK_BOT_USER_ID",
 ]
 
-CATEGORIES = [
-    "🖥️ CS (네트워크/OS)", "☕ Java", "🌱 Spring Boot",
-    "🗄️ Database", "⭐ 우대조건 (MSA / CI·CD / 대용량 트래픽 / 테스트)",
-]
-
-
 def validate_env():
     """누락된 필수 환경변수 목록 반환(빈 리스트면 OK)."""
     return [k for k in REQUIRED_ENV if not os.environ.get(k)]
 
 
+_QUESTION_SCHEMA = {
+    "type": "ARRAY",
+    "items": {
+        "type": "OBJECT",
+        "properties": {
+            "category": {"type": "STRING", "enum": CATEGORIES},
+            "title": {"type": "STRING"},
+            "question": {"type": "STRING"},
+        },
+        "required": ["category", "title", "question"],
+    },
+}
+
+
 def generate_questions(readme, count=5):
     """기존 README를 컨텍스트로 중복 없는 면접 질문 count개 생성.
-    [(category, title, question), ...] 반환. temperature=0.1 (정확도)."""
-    prompt = (
-        "너는 백엔드 기술 면접관이다. 아래 기존 README의 질문들과 절대 중복되지 않는 "
-        f"한국어 백엔드 면접 질문 {count}개를 생성하라. 카테고리는 다음에서 골고루 분배: "
-        f"{CATEGORIES}. Oracle Java/Spring Reference/AWS 가이드 기준으로 기술적으로 정확해야 한다.\n"
-        "각 질문에는 토글 목록에 표시할 5~10단어의 짧은 한국어 요약 제목(title)을 함께 만들어라.\n"
-        '출력은 순수 JSON 배열만: [{"category":"<카테고리>","title":"<짧은 제목>","question":"<질문>"}, ...]\n\n'
-        f"=== 기존 README ===\n{readme}"
+    [(category, title, question), ...] 반환. temperature=0.1 (정확도).
+    category는 responseSchema enum으로 CATEGORIES 값만 나오도록 강제한다."""
+    prompt = QUESTION_GENERATION_PROMPT.format(
+        count=count,
+        categories=", ".join(CATEGORIES),
+        readme=readme
     )
-    raw = call_gemini(prompt, temperature=0.1)
+    raw = call_gemini(prompt, temperature=0.1, response_schema=_QUESTION_SCHEMA)
     items = json.loads(raw)
     return [(it["category"], it["title"], it["question"]) for it in items]
 
@@ -480,7 +493,7 @@ def run_generate_routine():
         answer_map = {}
         for qid, question in unanswered[:_MAX_FILL_PER_RUN]:
             answer_map[qid] = call_gemini(
-                f"다음 백엔드 면접 질문의 모범답안을 한국어로 간결히 작성하라.\n질문: {question}",
+                MODEL_ANSWER_PROMPT.format(question=question),
                 temperature=0.1,
             )
         github_commit_with_retry(
@@ -507,6 +520,17 @@ def run_generate_routine():
             logger.exception("Slack 질문 전송 실패: %s", qid)
 
 
+def extract_question_from_parent(parent_text):
+    """질문 카드 형식(*[Qxxx] 카테고리 | 제목*\n질문)에서 질문 본문만 추출.
+    개행이 없으면 형식 불일치로 보고 원문 전체를 그대로 반환한다(방어적 폴백)."""
+    if not parent_text:
+        return ""
+    idx = parent_text.find("\n")
+    if idx == -1:
+        return parent_text.strip()
+    return parent_text[idx + 1:].strip()
+
+
 def handle_slack_event(payload):
     """루틴 B: 답변 추출 → ID 매핑 → Gemini 채점 → Slack 피드백 + README 갱신."""
     event = payload.get("event", {})
@@ -523,11 +547,11 @@ def handle_slack_event(payload):
         logger.info("부모 메시지에서 질문 ID를 찾지 못함")
         return
 
+    question = extract_question_from_parent(parent_text)
     feedback = call_gemini(
-        "너는 백엔드 면접관이다. 아래 답변의 기술적 정확성을 평가하라. 방향이 옳으면 "
-        "가볍게 칭찬하고 부족한 키워드를 짚고, 치명적 오개념이면 정중히 교정하고 모범 방향을 제시하라.\n"
-        f"답변: {answer}",
+        FEEDBACK_PROMPT.format(question=question, answer=answer),
         temperature=0.4,
+        thinking_budget=FEEDBACK_THINKING_BUDGET,
     )
 
     # 1) Slack 피드백 (해당 스레드)

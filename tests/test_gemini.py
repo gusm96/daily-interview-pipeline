@@ -65,3 +65,38 @@ def test_call_gemini_raises_clear_error_on_empty_candidates(monkeypatch):
     with pytest.raises(main.GeminiError):
         main.call_gemini("프롬프트", temperature=0.1)
 
+
+def test_call_gemini_passes_response_schema(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    schema = {"type": "ARRAY", "items": {"type": "OBJECT"}}
+    with patch("main.requests.post", return_value=_fake_resp("[]")) as p:
+        main.call_gemini("프롬프트", temperature=0.1, response_schema=schema)
+    sent = p.call_args.kwargs["json"]
+    assert sent["generationConfig"]["responseMimeType"] == "application/json"
+    assert sent["generationConfig"]["responseSchema"] == schema
+
+
+def test_call_gemini_omits_response_schema_by_default(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("main.requests.post", return_value=_fake_resp("답변")) as p:
+        main.call_gemini("프롬프트", temperature=0.1)
+    sent = p.call_args.kwargs["json"]
+    assert "responseSchema" not in sent["generationConfig"]
+    assert "responseMimeType" not in sent["generationConfig"]
+
+
+def test_call_gemini_passes_thinking_budget(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("main.requests.post", return_value=_fake_resp("답변")) as p:
+        main.call_gemini("프롬프트", temperature=0.4, thinking_budget=1024)
+    sent = p.call_args.kwargs["json"]
+    assert sent["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 1024
+
+
+def test_call_gemini_default_thinking_budget_is_zero(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("main.requests.post", return_value=_fake_resp("답변")) as p:
+        main.call_gemini("프롬프트", temperature=0.1)
+    sent = p.call_args.kwargs["json"]
+    assert sent["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 0
+
