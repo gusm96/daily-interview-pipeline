@@ -314,19 +314,24 @@ def _request_with_retry(fn, max_attempts=_RETRY_MAX_ATTEMPTS, retry_statuses=_RE
 GEMINI_TIMEOUT = 30  # 초 (§8.5). 루틴 A는 Scheduler 호출이라 3초 제약 없음. 2.5-flash 지연 여유.
 
 
-def call_gemini(prompt, temperature):
-    """Gemini generateContent REST 호출 → 텍스트 추출 → 펜스 제거."""
+def call_gemini(prompt, temperature, response_schema=None, thinking_budget=0):
+    """Gemini generateContent REST 호출 → 텍스트 추출 → 펜스 제거.
+    response_schema 지정 시 구조화 JSON 출력을 강제(responseMimeType+responseSchema).
+    thinking_budget으로 thinkingConfig.thinkingBudget 조절(기본 0, 지연·비용 절감)."""
     model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
     api_key = os.environ.get("GEMINI_API_KEY", "")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+    generation_config = {
+        "temperature": temperature,
+        "thinkingConfig": {"thinkingBudget": thinking_budget},
+    }
+    if response_schema is not None:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseSchema"] = response_schema
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            # 2.5-flash 기본 thinking 비활성화 → 지연·비용 절감 (질문 생성/채점엔 충분)
-            "thinkingConfig": {"thinkingBudget": 0},
-        },
+        "generationConfig": generation_config,
     }
     resp = _request_with_retry(
         lambda: requests.post(url, headers=headers, json=payload, timeout=GEMINI_TIMEOUT)
