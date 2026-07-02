@@ -448,3 +448,9 @@ def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
 
     main.run_generate_routine()
     assert calls["n"] == main._MAX_FILL_PER_RUN  # generate_questions는 대체됨 → fill 호출만 집계
+
+
+def test_model_answer_prompt_has_question_placeholder():
+    from prompts import MODEL_ANSWER_PROMPT
+    rendered = MODEL_ANSWER_PROMPT.format(question="테스트 질문")
+    assert "테스트 질문" in rendered
