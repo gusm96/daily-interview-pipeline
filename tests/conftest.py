@@ -32,7 +32,7 @@ SAMPLE_README = """# daily-interview-pipeline
 
 ## 🗄️ Database
 
-## ⭐ 우대조건 (MSA / CI·CD / 대용량 트래픽 / 테스트)
+## 🧩 기타 (Python·FastAPI·Next.js / MSA·CI·CD·대용량·테스트)
 """
 
 

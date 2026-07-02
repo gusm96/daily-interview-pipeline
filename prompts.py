@@ -6,7 +6,7 @@ CATEGORIES = [
     "☕ Java",
     "🌱 Spring Boot",
     "🗄️ Database",
-    "⭐ 우대조건 (MSA / CI·CD / 대용량 트래픽 / 테스트)",
+    "🧩 기타 (Python·FastAPI·Next.js / MSA·CI·CD·대용량·테스트)",
 ]
 
 # 질문 생성 프롬프트 (JSON 내 중괄호는 .format 호출을 위해 이중 중괄호 {{}}로 이스케이프 처리)

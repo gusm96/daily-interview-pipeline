@@ -16,7 +16,7 @@
 - **스레드↔질문 매핑**: 질문 고유 ID(`Q001`) 기반. README와 Slack 메시지에 동일 ID를 박아 공통 키로 사용. ID는 README를 스캔해 전역 누적 부여(stateless).
 - **Slack 3초 타임아웃**: 동기 처리 + `X-Slack-Retry-Num` 헤더로 재시도 중복 방지.
 - **Gemini**: `gemini-2.0-flash` REST 직접 호출(`requests`), 모델명은 상수/환경변수로 분리.
-- **README 구조**: 카테고리별 고정 섹션(CS / Java / Spring Boot / Database / 우대조건).
+- **README 구조**: 카테고리별 고정 섹션(CS / Java / Spring Boot / Database / 기타(Python·FastAPI·Next.js·우대조건)).
 
 ## 환경 변수
 
