@@ -11,6 +11,7 @@ import re
 import requests
 import time
 from slack_sdk import WebClient
+from prompts import CATEGORIES, QUESTION_GENERATION_PROMPT, MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
 
 
 
@@ -436,12 +437,6 @@ REQUIRED_ENV = [
     "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET", "SLACK_CHANNEL_ID", "SLACK_BOT_USER_ID",
 ]
 
-CATEGORIES = [
-    "🖥️ CS (네트워크/OS)", "☕ Java", "🌱 Spring Boot",
-    "🗄️ Database", "⭐ 우대조건 (MSA / CI·CD / 대용량 트래픽 / 테스트)",
-]
-
-
 def validate_env():
     """누락된 필수 환경변수 목록 반환(빈 리스트면 OK)."""
     return [k for k in REQUIRED_ENV if not os.environ.get(k)]
@@ -450,13 +445,10 @@ def validate_env():
 def generate_questions(readme, count=5):
     """기존 README를 컨텍스트로 중복 없는 면접 질문 count개 생성.
     [(category, title, question), ...] 반환. temperature=0.1 (정확도)."""
-    prompt = (
-        "너는 백엔드 기술 면접관이다. 아래 기존 README의 질문들과 절대 중복되지 않는 "
-        f"한국어 백엔드 면접 질문 {count}개를 생성하라. 카테고리는 다음에서 골고루 분배: "
-        f"{CATEGORIES}. Oracle Java/Spring Reference/AWS 가이드 기준으로 기술적으로 정확해야 한다.\n"
-        "각 질문에는 토글 목록에 표시할 5~10단어의 짧은 한국어 요약 제목(title)을 함께 만들어라.\n"
-        '출력은 순수 JSON 배열만: [{"category":"<카테고리>","title":"<짧은 제목>","question":"<질문>"}, ...]\n\n'
-        f"=== 기존 README ===\n{readme}"
+    prompt = QUESTION_GENERATION_PROMPT.format(
+        count=count,
+        categories=", ".join(CATEGORIES),
+        readme=readme
     )
     raw = call_gemini(prompt, temperature=0.1)
     items = json.loads(raw)
@@ -480,7 +472,7 @@ def run_generate_routine():
         answer_map = {}
         for qid, question in unanswered[:_MAX_FILL_PER_RUN]:
             answer_map[qid] = call_gemini(
-                f"다음 백엔드 면접 질문의 모범답안을 한국어로 간결히 작성하라.\n질문: {question}",
+                MODEL_ANSWER_PROMPT.format(question=question),
                 temperature=0.1,
             )
         github_commit_with_retry(
@@ -524,9 +516,7 @@ def handle_slack_event(payload):
         return
 
     feedback = call_gemini(
-        "너는 백엔드 면접관이다. 아래 답변의 기술적 정확성을 평가하라. 방향이 옳으면 "
-        "가볍게 칭찬하고 부족한 키워드를 짚고, 치명적 오개념이면 정중히 교정하고 모범 방향을 제시하라.\n"
-        f"답변: {answer}",
+        FEEDBACK_PROMPT.format(answer=answer),
         temperature=0.4,
     )
 
