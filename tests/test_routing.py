@@ -33,6 +33,15 @@ def test_generate_questions_returns_category_tuples(monkeypatch):
     assert len(result) == 2
 
 
+def test_generate_questions_passes_category_enum_schema(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    fake = '[{"category":"☕ Java","title":"T1","question":"Q1"}]'
+    with patch("main.call_gemini", return_value=fake) as m:
+        main.generate_questions("기존 readme")
+    schema = m.call_args.kwargs["response_schema"]
+    assert schema["items"]["properties"]["category"]["enum"] == main.CATEGORIES
+
+
 def test_run_generate_routine_flow(monkeypatch, sample_readme):
     for k in REQUIRED:
         monkeypatch.setenv(k, "x")

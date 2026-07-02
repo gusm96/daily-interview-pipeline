@@ -447,15 +447,30 @@ def validate_env():
     return [k for k in REQUIRED_ENV if not os.environ.get(k)]
 
 
+_QUESTION_SCHEMA = {
+    "type": "ARRAY",
+    "items": {
+        "type": "OBJECT",
+        "properties": {
+            "category": {"type": "STRING", "enum": CATEGORIES},
+            "title": {"type": "STRING"},
+            "question": {"type": "STRING"},
+        },
+        "required": ["category", "title", "question"],
+    },
+}
+
+
 def generate_questions(readme, count=5):
     """기존 README를 컨텍스트로 중복 없는 면접 질문 count개 생성.
-    [(category, title, question), ...] 반환. temperature=0.1 (정확도)."""
+    [(category, title, question), ...] 반환. temperature=0.1 (정확도).
+    category는 responseSchema enum으로 CATEGORIES 값만 나오도록 강제한다."""
     prompt = QUESTION_GENERATION_PROMPT.format(
         count=count,
         categories=", ".join(CATEGORIES),
         readme=readme
     )
-    raw = call_gemini(prompt, temperature=0.1)
+    raw = call_gemini(prompt, temperature=0.1, response_schema=_QUESTION_SCHEMA)
     items = json.loads(raw)
     return [(it["category"], it["title"], it["question"]) for it in items]
 
