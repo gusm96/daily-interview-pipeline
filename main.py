@@ -312,6 +312,7 @@ def _request_with_retry(fn, max_attempts=_RETRY_MAX_ATTEMPTS, retry_statuses=_RE
 
 
 GEMINI_TIMEOUT = 30  # 초 (§8.5). 루틴 A는 Scheduler 호출이라 3초 제약 없음. 2.5-flash 지연 여유.
+FEEDBACK_THINKING_BUDGET = 1024  # 채점 품질 개선용. 비용 영향 미미(건당 출력 토큰 소량 증가).
 
 
 def call_gemini(prompt, temperature, response_schema=None, thinking_budget=0):
@@ -519,6 +520,17 @@ def run_generate_routine():
             logger.exception("Slack 질문 전송 실패: %s", qid)
 
 
+def extract_question_from_parent(parent_text):
+    """질문 카드 형식(*[Qxxx] 카테고리 | 제목*\n질문)에서 질문 본문만 추출.
+    개행이 없으면 형식 불일치로 보고 원문 전체를 그대로 반환한다(방어적 폴백)."""
+    if not parent_text:
+        return ""
+    idx = parent_text.find("\n")
+    if idx == -1:
+        return parent_text.strip()
+    return parent_text[idx + 1:].strip()
+
+
 def handle_slack_event(payload):
     """루틴 B: 답변 추출 → ID 매핑 → Gemini 채점 → Slack 피드백 + README 갱신."""
     event = payload.get("event", {})
@@ -535,9 +547,11 @@ def handle_slack_event(payload):
         logger.info("부모 메시지에서 질문 ID를 찾지 못함")
         return
 
+    question = extract_question_from_parent(parent_text)
     feedback = call_gemini(
-        FEEDBACK_PROMPT.format(answer=answer),
+        FEEDBACK_PROMPT.format(question=question, answer=answer),
         temperature=0.4,
+        thinking_budget=FEEDBACK_THINKING_BUDGET,
     )
 
     # 1) Slack 피드백 (해당 스레드)
