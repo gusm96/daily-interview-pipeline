@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 import functions_framework
 import hashlib
 import hmac
-from functools import partial
 import json
 import logging
 import os
@@ -48,9 +47,6 @@ def parse_question_id(text):
     return f"Q{m.group(1)}" if m else None
 
 
-# 질문 헤더 라인만 스캔 (M-2): "- <details><summary><b>[Q###] ..." 형태만 매칭
-_HEADER_ID_RE = re.compile(r"^\s*-\s*<details><summary><b>\[Q(\d{3,})\]", re.MULTILINE)
-
 _CONFIG_DEFAULT_RE = re.compile(r"<!--\s*config:default=(\d+)\s*-->")
 _MENTION_TOKEN_RE = re.compile(r"<@[\w]+>")
 _CONFIG_SET_RE = re.compile(r"--default=(-?\d+)")
@@ -64,8 +60,7 @@ def get_config_default(readme):
 
 
 def set_config_default(readme, n):
-    """config:default 마커를 갱신(없으면 README 상단에 삽입). (new_content, n) 반환.
-    github_commit_with_retry(lambda c: set_config_default(c, n))로 사용."""
+    """config:default 마커를 갱신(없으면 README 상단에 삽입). (new_content, n) 반환."""
     marker = f"<!-- config:default={n} -->"
     if _CONFIG_DEFAULT_RE.search(readme or ""):
         return _CONFIG_DEFAULT_RE.sub(marker, readme), n
@@ -100,116 +95,6 @@ def build_help_text():
         "💬 *답변 방법*: 봇이 보낸 질문 메시지에 *스레드 답글*로 답하면 AI가 채점·피드백합니다.\n"
         "ℹ️ 답변하지 않은 질문은 다음 날 오전 7시에 AI 모범답안이 자동 작성됩니다."
     )
-
-
-def next_question_ids(readme, count):
-    """README의 질문 헤더 라인만 스캔해 최대 ID+1부터 count개 ID 반환."""
-    nums = [int(n) for n in _HEADER_ID_RE.findall(readme or "")]
-    start = (max(nums) + 1) if nums else 1
-    return [f"Q{n:03d}" for n in range(start, start + count)]
-
-
-def build_question_block(qid, title, question, date_str):
-    """스펙 §7 접이식 질문 블록 마크다운 생성. 토글 요약엔 짧은 제목, 펼치면 전체 질문 + 답변/피드백 칸."""
-    return (
-        f"- <details><summary><b>[{qid}]</b> {title} <i>({date_str})</i></summary>\n"
-        f"  \n"
-        f"  **Q.** {question}\n"
-        f"  \n"
-        f"  ### 🧑‍💻 나의 답변\n"
-        f"  \n"
-        f"  ### 🤖 AI 피드백\n"
-        f"  \n"
-        f"  </details>"
-    )
-
-
-AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
-
-# 한 질문 블록 전체를 캡처: summary의 ID + details 내부의 전체 질문(**Q.**) + 답변 본문
-_BLOCK_RE = re.compile(
-    r"<summary><b>\[(Q\d{3,})\]</b>.*?\*\*Q\.\*\*\s*(.*?)\s*"
-    r"### 🧑‍💻 나의 답변\s*(.*?)\s*### 🤖 AI 피드백",
-    re.DOTALL,
-)
-
-
-def find_unanswered_questions(readme):
-    """(qid, 질문텍스트) 목록 반환. 조건: 답변 본문 공백 AND AI 자동 태그 없음 (C-3)."""
-    out = []
-    for qid, question, answer_body in _BLOCK_RE.findall(readme or ""):
-        body = answer_body.strip()
-        if body == "" and AI_AUTO_TAG not in answer_body:
-            out.append((qid, question.strip()))
-    return out
-
-
-def update_answer_block(readme, qid, answer, feedback):
-    """qid 블록의 '나의 답변'/'AI 피드백' 칸을 치환. (new_content, None) 반환.
-    AI 자동 태그가 있으면 제거(C-3). 대상 미존재/치환 실패 시 ValueError(Mi-1)."""
-    # 해당 qid 블록의 details 내부 구간만 치환
-    block_pat = re.compile(
-        r"(-\s*<details><summary><b>\[" + re.escape(qid) + r"\]</b>.*?"
-        r"### 🧑‍💻 나의 답변\n)(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*</details>)",
-        re.DOTALL,
-    )
-    # 각 줄마다 2칸씩 들여쓰기 적용 (빈 줄도 들여쓰기하여 마크다운 양식 일관성 유지)
-    indented_answer_lines = [f"  {line}" for line in answer.splitlines()]
-    indented_answer = "\n".join(indented_answer_lines) if indented_answer_lines else "  "
-    new_answer = f"{indented_answer}\n"
-
-    indented_feedback_lines = [f"  {line}" for line in feedback.splitlines()]
-    indented_feedback = "\n".join(indented_feedback_lines) if indented_feedback_lines else "  "
-    new_feedback = f"{indented_feedback}\n"
-
-    def _repl(m):
-        return m.group(1) + new_answer + m.group(3) + new_feedback + m.group(5)
-
-    new_content, n = block_pat.subn(_repl, readme)
-    if n == 0:
-        raise ValueError(f"질문 블록을 찾지 못함: {qid}")
-    return new_content, None
-
-
-def append_questions(questions, readme, date_str=None):
-    """mutate_fn(partial(append_questions, questions, date_str=...)). 최신 readme 기준으로
-    ID를 재할당해 카테고리 섹션 아래 append. (new_content, 할당된 ID 목록) 반환 (C-1).
-    카테고리 섹션이 없으면 생성 (Mi-4/S-5)."""
-    if date_str is None:
-        date_str = today_kst_iso()
-
-    content = readme if readme.endswith("\n") else readme + "\n"
-    ids = next_question_ids(content, len(questions))
-
-    for qid, (category, title, question) in zip(ids, questions):
-        block = build_question_block(qid, title, question, date_str)
-        header = f"## {category}"
-        if header in content:
-            # 해당 카테고리 섹션 헤더 라인 바로 뒤에 삽입
-            idx = content.index(header) + len(header)
-            # 헤더 줄 끝(다음 개행)까지 이동
-            nl = content.index("\n", idx)
-            content = content[: nl + 1] + "\n" + block + "\n" + content[nl + 1 :]
-        else:
-            # 섹션 신규 생성 후 append
-            content = content.rstrip("\n") + f"\n\n{header}\n\n{block}\n"
-    return content, ids
-
-
-def fill_unanswered_questions(answer_map, readme):
-    """mutate_fn(partial(fill_unanswered_questions, answer_map)). 최신 readme에서 미답변
-    (본문 공백 AND AI 태그 없음)인 qid에만, answer_map의 답변을 AI 태그와 함께 주입.
-    (new_content, 채운 qid 목록) 반환. 이미 채워진 블록은 건너뜀(멱등, Minor-1)."""
-    content = readme
-    filled = []
-    unanswered_ids = {qid for qid, _ in find_unanswered_questions(content)}
-    for qid in unanswered_ids:
-        if qid not in answer_map:
-            continue
-        tagged = f"{AI_AUTO_TAG}\n{answer_map[qid]}"
-        content, _ = update_answer_block(content, qid, tagged, "(AI 자동 작성 - 검토 필요)")
-        filled.append(qid)
-    return content, sorted(filled)
 
 
 def verify_slack_signature(request):
@@ -372,12 +257,6 @@ def _github_headers():
     }
 
 
-def _readme_url():
-    owner = os.environ.get("REPO_OWNER", "")
-    name = os.environ.get("REPO_NAME", "")
-    return f"{GITHUB_API}/repos/{owner}/{name}/contents/README.md"
-
-
 def _contents_url(path):
     owner = os.environ.get("REPO_OWNER", "")
     name = os.environ.get("REPO_NAME", "")
@@ -395,45 +274,6 @@ def github_get_file(path):
         raise GitHubError(f"파일 조회 실패({path}): {resp.status_code}")
     data = resp.json()
     return base64.b64decode(data["content"]).decode("utf-8"), data["sha"]
-
-
-def github_get_readme():
-    """README content(디코딩) + sha 반환."""
-    resp = _request_with_retry(
-        lambda: requests.get(_readme_url(), headers=_github_headers(), timeout=10)
-    )
-    if not resp.ok:
-        raise GitHubError(f"README 조회 실패: {resp.status_code}")
-    data = resp.json()
-    content = base64.b64decode(data["content"]).decode("utf-8")
-    return content, data["sha"]
-
-
-def github_commit_with_retry(mutate_fn, message, max_retries=3):
-    """README 조회 → (new, result)=mutate_fn(content) → PUT. 409 시 재조회·재적용·재시도.
-    성공 시 (new_content, result) 반환 (C-1/C-2)."""
-    for attempt in range(max_retries):
-        content, sha = github_get_readme()
-        new_content, result = mutate_fn(content)
-        payload = {
-            "message": message,
-            "content": base64.b64encode(new_content.encode("utf-8")).decode(),
-            "sha": sha,
-        }
-        resp = _request_with_retry(
-            lambda: requests.put(
-                _readme_url(), headers=_github_headers(), json=payload, timeout=10
-            )
-        )
-        if resp.ok:
-            logger.info("GitHub 커밋 성공: %s", message)
-            return new_content, result
-        if resp.status_code == 409:
-            logger.warning("GitHub 409 충돌, 재시도 %d/%d", attempt + 1, max_retries)
-            time.sleep(2 ** attempt)
-            continue
-        raise GitHubError(f"커밋 실패: {resp.status_code}")
-    raise GitHubError("409 재시도 소진")
 
 
 def _git_url(suffix):

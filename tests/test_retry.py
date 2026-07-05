@@ -45,34 +45,6 @@ def test_request_with_retry_does_not_retry_non_network_errors():
     assert calls["n"] == 1
 
 
-def test_github_get_readme_retries_on_ssl_error(monkeypatch):
-    """github_get_readme는 SSL 끊김을 만나도 재시도해 성공할 수 있어야 한다."""
-    import base64
-    from unittest.mock import MagicMock, patch
-
-    monkeypatch.setenv("REPO_OWNER", "o")
-    monkeypatch.setenv("REPO_NAME", "n")
-    monkeypatch.setenv("GITHUB_TOKEN", "t")
-    monkeypatch.setattr(main.time, "sleep", lambda *_: None)
-
-    good = MagicMock()
-    good.ok = True
-    good.status_code = 200
-    good.json.return_value = {
-        "content": base64.b64encode(b"# Hello").decode(),
-        "sha": "sha1",
-    }
-
-    with patch(
-        "main.requests.get",
-        side_effect=[requests.exceptions.SSLError("eof"), good],
-    ):
-        content, sha = main.github_get_readme()
-
-    assert content == "# Hello"
-    assert sha == "sha1"
-
-
 def test_request_with_retry_default_rides_out_extended_ssl_blip(monkeypatch):
     """기본 재시도 횟수가 늘어 더 긴 SSL 블립(연속 4회)을 견딘다(6/29 GitHub 블립 대응)."""
     monkeypatch.setattr(main.time, "sleep", lambda *_: None)
