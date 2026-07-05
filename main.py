@@ -555,44 +555,70 @@ _MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차
 
 
 def run_generate_routine():
-    """루틴 A: 미답변 자동 채움 → 신규 질문 생성/커밋 → Slack 전송."""
+    """루틴 A: 미답변 자동 모범답안 + 신규 질문 생성 → 파일/인덱스/README 1커밋 → Slack."""
     missing = validate_env()
     if missing:
         logger.error("필수 환경변수 누락: %s", missing)
         raise RuntimeError(f"환경변수 누락: {missing}")
 
-    # 1) 미답변 식별 + 모범답안 선생성
-    content, _ = github_get_readme()
-    unanswered = find_unanswered_questions(content)
-    if unanswered:
-        answer_map = {}
-        for qid, question in unanswered[:_MAX_FILL_PER_RUN]:
-            answer_map[qid] = call_gemini(
-                MODEL_ANSWER_PROMPT.format(question=question),
-                temperature=0.1,
-            )
-        github_commit_with_retry(
-            partial(fill_unanswered_questions, answer_map), "fill unanswered questions"
-        )
-
-    # 2) 신규 질문 생성 (ID 미확정, config default 개수 적용; 1~10 클램프 R-4)
-    content, _ = github_get_readme()
-    count = max(1, min(10, get_config_default(content)))
-    questions = generate_questions(content, count)
-
-    # 3) append 커밋 + 확정 ID 회수
+    readme, _ = github_get_file("README.md")
+    if readme is None:
+        readme = storage.EMPTY_README
+    files = {}
     today = today_kst_iso()
-    _, assigned_ids = github_commit_with_retry(
-        partial(append_questions, questions, date_str=today), "add daily questions"
-    )
 
-    # 4) Slack 전송 (확정 ID 사용)
+    # 1) 창 안 미답변 → 모범답안 생성 후 README 패치 + 문제 파일 + 인덱스
+    for qid, slug, date, title, question in storage.scan_window_unanswered(readme)[:_MAX_FILL_PER_RUN]:
+        answer = call_gemini(MODEL_ANSWER_PROMPT.format(question=question), temperature=0.1)
+        feedback = "(AI 자동 작성 - 검토 필요)"
+        readme = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=True)
+        category = storage.category_for_slug(slug)
+        q = storage.Question(qid, slug, category, title, date, question,
+                             answer=answer, feedback=feedback, ai_auto=True)
+        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
+        idx_text = _index_text(files, slug)
+        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+            idx_text, slug, category, qid, title, date, storage.status_label(q))
+
+    # 2) 신규 질문 생성 (config default, 1~10 클램프)
+    count = max(1, min(10, get_config_default(readme)))
+    questions = generate_questions(readme, count)
+    index_texts = [_index_text(files, s) for s in storage.SLUGS]
+    ids = storage.next_question_ids(index_texts, len(questions))
+
+    for qid, (category, title, question) in zip(ids, questions):
+        slug = storage.slug_for(category)
+        q = storage.Question(qid, slug, category, title, today, question)
+        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
+        idx_text = _index_text(files, slug)
+        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+            idx_text, slug, category, qid, title, today, storage.status_label(q))
+        readme = storage.insert_toggle(readme, storage.build_readme_toggle(q))
+
+    # 3) 창 벗어난 토글 prune
+    cutoff = (datetime.fromisoformat(today) - timedelta(days=storage.README_WINDOW_DAYS - 1)).date().isoformat()
+    readme = storage.prune_expired(readme, cutoff)
+    files["README.md"] = readme
+
+    # 4) 1커밋
+    github_commit_files(files, "add daily questions")
+
+    # 5) Slack 전송
     channel = os.environ.get("SLACK_CHANNEL_ID", "")
-    for qid, (category, title, question) in zip(assigned_ids, questions):
+    for qid, (category, title, question) in zip(ids, questions):
         try:
             slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
         except Exception:
             logger.exception("Slack 질문 전송 실패: %s", qid)
+
+
+def _index_text(files, slug):
+    """커밋 대기 중 files dict에 있으면 그걸, 없으면 원격 인덱스를 조회(없으면 '')."""
+    path = f"{slug}/{slug}.md"
+    if path in files:
+        return files[path]
+    text, _ = github_get_file(path)
+    return text or ""
 
 
 def extract_question_from_parent(parent_text):

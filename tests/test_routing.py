@@ -42,41 +42,50 @@ def test_generate_questions_passes_category_enum_schema(monkeypatch):
     assert schema["items"]["properties"]["category"]["enum"] == main.CATEGORIES
 
 
-def test_run_generate_routine_flow(monkeypatch, sample_readme):
+def _fresh_readme_with_unanswered(qid="Q002"):
+    import storage
+    q = storage.Question(qid, "Java", storage.category_for_slug("Java"),
+                         "OSI", "2026-07-05", "OSI란?")
+    return storage.insert_toggle(storage.EMPTY_README, storage.build_readme_toggle(q))
+
+
+def test_run_generate_routine_flow(monkeypatch):
+    import storage
     for k in REQUIRED:
         monkeypatch.setenv(k, "x")
-
     posted = []
     monkeypatch.setattr(main, "slack_post_message",
                         lambda ch, text, thread_ts=None: posted.append(text))
-    # Gemini 모범답안 + 질문 생성 모킹
-    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
+    monkeypatch.setattr(main, "call_gemini",
+                        lambda p, temperature: "AI답안")            # 모범답안
     monkeypatch.setattr(main, "generate_questions",
-                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1"), ("🗄️ Database", "제목2", "새 질문2")])
-
-    commits = []
-
-    def fake_commit(mutate_fn, message, max_retries=3):
-        new_content, result = mutate_fn(sample_readme)
-        commits.append(message)
-        return new_content, result
-
-    monkeypatch.setattr(main, "github_commit_with_retry", fake_commit)
-    monkeypatch.setattr(main, "github_get_readme", lambda: (sample_readme, "sha"))
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1"),
+                                            ("🗄️ Database", "제목2", "새 질문2")])
+    readme = _fresh_readme_with_unanswered("Q002")
+    monkeypatch.setattr(main, "github_get_file",
+                        lambda path: (readme, "s") if path == "README.md" else ("", None))
+    committed = {}
+    monkeypatch.setattr(main, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files, msg=message))
+    monkeypatch.setattr(main, "today_kst_iso", lambda: "2026-07-06")
 
     main.run_generate_routine()
 
-    # 미답변(Q002) 채움 커밋 + 질문 append 커밋 = 2회
-    assert len(commits) == 2
-    # Slack에 질문 2개 개별 전송, ID 포함
-    assert len(posted) == 2
-    assert any("Q003" in t for t in posted)
+    files = committed["files"]
+    # 신규 질문 2개 파일 + 각 인덱스 + README
+    assert "Java/Q003.md" in files and "Database/Q004.md" in files
+    assert "README.md" in files
+    # 미답변 Q002 자동답안 반영(README 토글 + 문제 파일)
+    assert "AI답안" in files["README.md"]
+    assert "Java/Q002.md" in files
+    # Slack에 신규 질문 2건, ID 포함
+    assert len(posted) == 2 and any("Q003" in t for t in posted)
 
 
-def test_run_generate_routine_uses_config_default(monkeypatch, sample_readme):
+def test_run_generate_uses_and_clamps_config_default(monkeypatch):
+    import storage
     for k in REQUIRED:
         monkeypatch.setenv(k, "x")
-    readme = "<!-- config:default=3 -->\n" + sample_readme
     captured = {}
     monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
     monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
@@ -86,11 +95,13 @@ def test_run_generate_routine_uses_config_default(monkeypatch, sample_readme):
         return [("☕ Java", "t", "q")]
 
     monkeypatch.setattr(main, "generate_questions", fake_generate)
-    monkeypatch.setattr(main, "github_get_readme", lambda: (readme, "sha"))
-    monkeypatch.setattr(main, "github_commit_with_retry",
-                        lambda fn, msg, max_retries=3: fn(readme))
+    readme = "<!-- config:default=50 -->\n" + storage.EMPTY_README
+    monkeypatch.setattr(main, "github_get_file",
+                        lambda path: (readme, "s") if path == "README.md" else ("", None))
+    monkeypatch.setattr(main, "github_commit_files", lambda files, message, **kw: None)
+    monkeypatch.setattr(main, "today_kst_iso", lambda: "2026-07-06")
     main.run_generate_routine()
-    assert captured["count"] == 3
+    assert captured["count"] == 10     # 50 → 10 클램프
 
 
 def test_handle_slack_event_grades_and_commits(monkeypatch):
@@ -361,27 +372,6 @@ def test_handle_app_mention_ignores_bot(monkeypatch):
     assert posted == []
 
 
-def test_run_generate_routine_clamps_out_of_range_default(monkeypatch, sample_readme):
-    # 마커가 범위를 벗어나면(50) 생성 개수는 10으로 클램프
-    for k in REQUIRED:
-        monkeypatch.setenv(k, "x")
-    readme = "<!-- config:default=50 -->\n" + sample_readme
-    captured = {}
-    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
-    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
-
-    def fake_generate(r, count=5):
-        captured["count"] = count
-        return [("☕ Java", "t", "q")]
-
-    monkeypatch.setattr(main, "generate_questions", fake_generate)
-    monkeypatch.setattr(main, "github_get_readme", lambda: (readme, "sha"))
-    monkeypatch.setattr(main, "github_commit_with_retry",
-                        lambda fn, msg, max_retries=3: fn(readme))
-    main.run_generate_routine()
-    assert captured["count"] == 10
-
-
 def test_is_authorized_user_no_restriction_when_unset(monkeypatch):
     monkeypatch.delenv("SLACK_ALLOWED_USER_IDS", raising=False)
     assert main.is_authorized_user({"user": "UANY"}) is True
@@ -460,30 +450,27 @@ def test_today_kst_iso_at_0700_kst_returns_same_kst_day(monkeypatch):
     assert main.today_kst_iso() == "2026-06-30"
 
 
-def test_append_questions_default_date_uses_kst(monkeypatch):
-    fixed = main.datetime(2026, 6, 30, 7, 30, tzinfo=main.KST)
-    monkeypatch.setattr(main, "_now_kst", lambda: fixed)
-    new_content, ids = main.append_questions([("CS", "제목", "질문 본문")], "## CS\n\n")
-    assert "(2026-06-30)" in new_content
-
-
 def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
-    # 미답변이 많아도 한 번에 최대 _MAX_FILL_PER_RUN개만 모범답안 생성
-    many = [(f"Q{i:03d}", f"질문{i}") for i in range(1, 30)]
-    monkeypatch.setattr(main, "validate_env", lambda: [])
-    monkeypatch.setattr(main, "github_get_readme", lambda: ("README", "sha"))
-    monkeypatch.setattr(main, "find_unanswered_questions", lambda c: many)
-    monkeypatch.setattr(main, "get_config_default", lambda c: 1)
-    monkeypatch.setattr(main, "generate_questions", lambda c, n: [("CS", "t", "q")])
-    monkeypatch.setattr(main, "github_commit_with_retry", lambda fn, msg: ("README", ["Q100"]))
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    # README에 미답변 20개
+    r = storage.EMPTY_README
+    for i in range(1, 21):
+        q = storage.Question(f"Q{i:03d}", "CS", storage.category_for_slug("CS"),
+                             f"t{i}", "2026-07-05", f"질문{i}")
+        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
+    monkeypatch.setattr(main, "github_get_file",
+                        lambda path: (r, "s") if path == "README.md" else ("", None))
+    monkeypatch.setattr(main, "generate_questions", lambda c, count=5: [("☕ Java", "t", "q")])
+    monkeypatch.setattr(main, "github_commit_files", lambda files, message, **kw: None)
     monkeypatch.setattr(main, "slack_post_message", lambda *a, **k: None)
-    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    monkeypatch.setattr(main, "today_kst_iso", lambda: "2026-07-06")
     calls = {"n": 0}
     monkeypatch.setattr(main, "call_gemini",
                         lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
-
     main.run_generate_routine()
-    assert calls["n"] == main._MAX_FILL_PER_RUN  # generate_questions는 대체됨 → fill 호출만 집계
+    assert calls["n"] == main._MAX_FILL_PER_RUN
 
 
 def test_model_answer_prompt_has_question_placeholder():
