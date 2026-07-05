@@ -64,3 +64,42 @@ def test_question_file_has_meta_and_heading():
                            "answered=false ai_auto=false -->")
     assert "# [Q001] TCP 흐름제어" in text
     assert "**Q.** 흐름제어와 혼잡제어의 차이는?" in text
+
+
+def test_upsert_index_creates_when_empty():
+    out = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
+                                   "Q001", "TCP", "2026-07-05", "⬜ 미답변")
+    assert "총 1개" in out
+    assert "| [Q001](./Q001.md) | TCP | 2026-07-05 | ⬜ 미답변 |" in out
+
+
+def test_upsert_index_appends_and_sorts_desc():
+    t = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
+                                 "Q001", "A", "2026-07-01", "⬜ 미답변")
+    t = storage.upsert_index_row(t, "CS", storage.category_for_slug("CS"),
+                                 "Q003", "B", "2026-07-03", "⬜ 미답변")
+    assert "총 2개" in t
+    # Q003이 Q001보다 위(최신 먼저)
+    assert t.index("Q003") < t.index("Q001")
+
+
+def test_upsert_index_updates_existing_status_no_dup():
+    t = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
+                                 "Q001", "A", "2026-07-01", "⬜ 미답변")
+    t = storage.upsert_index_row(t, "CS", storage.category_for_slug("CS"),
+                                 "Q001", "A", "2026-07-01", "✅ 답변완료")
+    assert "총 1개" in t                 # 중복 추가 아님
+    assert "✅ 답변완료" in t
+    assert "⬜ 미답변" not in t
+
+
+def test_next_question_ids_scans_multiple_indexes():
+    idx1 = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
+                                    "Q005", "A", "d", "⬜ 미답변")
+    idx2 = storage.upsert_index_row("", "Java", storage.category_for_slug("Java"),
+                                    "Q009", "B", "d", "⬜ 미답변")
+    assert storage.next_question_ids([idx1, idx2, ""], 2) == ["Q010", "Q011"]
+
+
+def test_next_question_ids_from_empty():
+    assert storage.next_question_ids(["", ""], 2) == ["Q001", "Q002"]

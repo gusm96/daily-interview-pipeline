@@ -100,3 +100,41 @@ def parse_question_file(text):
         answered=m.group("answered") == "true",
         ai_auto=m.group("ai") == "true",
     )
+
+
+_INDEX_ROW_RE = re.compile(
+    r"^\|\s*\[(Q\d{3,})\]\(\./\1\.md\)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|$",
+    re.MULTILINE,
+)
+_QID_ANY_RE = re.compile(r"\bQ(\d{3,})\b")
+
+
+def _index_rows(index_text):
+    """인덱스 텍스트 → [(qid, title, date, status)] (등장 순서)."""
+    return [(m.group(1), m.group(2), m.group(3), m.group(4))
+            for m in _INDEX_ROW_RE.finditer(index_text or "")]
+
+
+def _render_index(slug, category, rows):
+    rows = sorted(rows, key=lambda r: r[0], reverse=True)  # ID 내림차순
+    header = f"# {category} — 전체 문제 (총 {len(rows)}개)\n\n"
+    table = "| ID | 제목 | 출제일 | 상태 |\n| --- | --- | --- | --- |\n"
+    body = "".join(
+        f"| [{qid}](./{qid}.md) | {title} | {date} | {status} |\n"
+        for qid, title, date, status in rows
+    )
+    return header + table + body
+
+
+def upsert_index_row(index_text, slug, category, qid, title, date, status):
+    """qid 행을 추가하거나 갱신한 인덱스 텍스트 반환(총 개수·정렬 유지)."""
+    rows = [r for r in _index_rows(index_text) if r[0] != qid]
+    rows.append((qid, title, date, status))
+    return _render_index(slug, category, rows)
+
+
+def next_question_ids(index_texts, count):
+    """여러 인덱스 텍스트에서 최대 Q### + 1부터 count개 ID 반환."""
+    nums = [int(n) for t in index_texts for n in _QID_ANY_RE.findall(t or "")]
+    start = (max(nums) + 1) if nums else 1
+    return [f"Q{n:03d}" for n in range(start, start + count)]
