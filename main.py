@@ -624,8 +624,17 @@ def parse_parent_header(parent_text):
     return qid, category, m.group(2).strip()
 
 
+def _find_slug_for_qid(qid):
+    """카테고리 미확인 시 5개 인덱스를 스캔해 qid가 속한 slug를 찾음. 없으면 None."""
+    for slug in storage.SLUGS:
+        text, _ = github_get_file(f"{slug}/{slug}.md")
+        if text and qid in text:
+            return slug
+    return None
+
+
 def handle_slack_event(payload):
-    """루틴 B: 답변 추출 → ID 매핑 → Gemini 채점 → Slack 피드백 + README 갱신."""
+    """루틴 B: 답변 추출 → 채점 → Slack 피드백 + 문제 파일/인덱스/README 1커밋."""
     event = payload.get("event", {})
     answer = extract_user_answer(event)
     if not answer:
@@ -635,32 +644,49 @@ def handle_slack_event(payload):
     channel = event.get("channel", "")
     thread_ts = event.get("thread_ts")
     parent_text = slack_get_thread_parent(channel, thread_ts)
-    qid = parse_question_id(parent_text)
+    qid, category, title = parse_parent_header(parent_text)
     if not qid:
         logger.info("부모 메시지에서 질문 ID를 찾지 못함")
         return
 
-    question = extract_question_from_parent(parent_text)
+    slug = storage.slug_for(category) if category else _find_slug_for_qid(qid)
+    if not slug:
+        logger.warning("qid의 카테고리를 찾지 못함: %s", qid)
+        return
+
+    qfile_text, _ = github_get_file(f"{slug}/{qid}.md")
+    if not qfile_text:
+        logger.warning("문제 파일 없음: %s/%s.md", slug, qid)
+        return
+    q = storage.parse_question_file(qfile_text)
+
     feedback = call_gemini(
-        FEEDBACK_PROMPT.format(question=question, answer=answer),
+        FEEDBACK_PROMPT.format(question=q.question, answer=answer),
         temperature=0.4,
         thinking_budget=FEEDBACK_THINKING_BUDGET,
     )
 
-    # 1) Slack 피드백 (해당 스레드)
     try:
         slack_post_message(channel, f"🤖 *AI 피드백*\n{feedback}", thread_ts=thread_ts)
     except Exception:
         logger.exception("Slack 피드백 전송 실패")
 
-    # 2) README 갱신 (멱등 mutate + 409 재시도)
+    # 문제 파일 갱신
+    q.answer, q.feedback, q.answered, q.ai_auto = answer, feedback, True, False
+    files = {f"{slug}/{qid}.md": storage.render_question_file(q)}
+    # 인덱스 상태 배지
+    idx_text, _ = github_get_file(f"{slug}/{slug}.md")
+    files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+        idx_text or "", slug, q.category, qid, q.title, q.date, storage.status_label(q))
+    # README 토글(창 안일 때만)
+    readme, _ = github_get_file("README.md")
+    if readme and storage.has_toggle(readme, qid):
+        files["README.md"] = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=False)
+
     try:
-        github_commit_with_retry(
-            lambda c: update_answer_block(c, qid, answer, feedback),
-            f"update {qid} answer",
-        )
+        github_commit_files(files, f"update {qid} answer")
     except Exception:
-        logger.exception("README 갱신 실패(불일치 가능): %s", qid)
+        logger.exception("문제 파일 갱신 실패: %s", qid)
 
 
 def is_authorized_user(event):
