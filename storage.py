@@ -138,3 +138,47 @@ def next_question_ids(index_texts, count):
     nums = [int(n) for t in index_texts for n in _QID_ANY_RE.findall(t or "")]
     start = (max(nums) + 1) if nums else 1
     return [f"Q{n:03d}" for n in range(start, start + count)]
+
+
+_Q_START = "<!-- questions:start -->"
+_Q_END = "<!-- questions:end -->"
+
+EMPTY_README = (
+    "<!-- config:default=5 -->\n"
+    "# daily-interview-pipeline\n"
+    "GCP Cloud Functions & Gemini API를 이용해 매일 아침 자동으로 빌드되는 "
+    "백엔드 기술 면접 독학 저장소\n\n"
+    "📚 카테고리별 전체 문제: "
+    "[CS](./CS/CS.md) · [Java](./Java/Java.md) · [SpringBoot](./SpringBoot/SpringBoot.md) · "
+    "[Database](./Database/Database.md) · [Etc](./Etc/Etc.md)\n\n"
+    "## 최근 7일 문제\n\n"
+    f"{_Q_START}\n{_Q_END}\n"
+)
+
+
+def build_readme_toggle(q):
+    """Question → README 롤링 윈도우용 토글(리스트 아이템). 첫 줄에 기계 판독 마커."""
+    answer = q.answer if q.answer else ""
+    feedback = q.feedback if q.feedback else ""
+    ans_block = "\n".join(f"  {ln}" for ln in answer.splitlines()) if answer else "  "
+    fb_block = "\n".join(f"  {ln}" for ln in feedback.splitlines()) if feedback else "  "
+    return (
+        f"- <!-- q {q.id} {q.slug} {q.date} --><details>"
+        f"<summary><b>[{q.id}]</b> {q.category} | {q.title} <i>({q.date})</i></summary>\n"
+        f"  \n"
+        f"  **Q.** {q.question}\n"
+        f"  \n"
+        f"  ### 🧑‍💻 나의 답변\n{ans_block}\n"
+        f"  \n"
+        f"  ### 🤖 AI 피드백\n{fb_block}\n"
+        f"  \n"
+        f"  📄 [전체 보기](./{q.slug}/{q.id}.md)\n"
+        f"  </details>"
+    )
+
+
+def insert_toggle(readme, toggle):
+    """questions:start 바로 아래에 토글을 삽입(최신 먼저)."""
+    anchor = _Q_START + "\n"
+    idx = readme.index(anchor) + len(anchor)
+    return readme[:idx] + toggle + "\n" + readme[idx:]

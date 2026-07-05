@@ -103,3 +103,22 @@ def test_next_question_ids_scans_multiple_indexes():
 
 def test_next_question_ids_from_empty():
     assert storage.next_question_ids(["", ""], 2) == ["Q001", "Q002"]
+
+
+def test_toggle_has_marker_and_summary():
+    q = _q(id="Q015")
+    tog = storage.build_readme_toggle(q)
+    assert tog.startswith("- <!-- q Q015 CS 2026-07-05 -->")
+    assert "<summary><b>[Q015]</b> 🖥️ CS (네트워크/OS) | TCP 흐름제어 " \
+           "<i>(2026-07-05)</i></summary>" in tog
+    assert "📄 [전체 보기](./CS/Q015.md)" in tog
+    assert tog.rstrip().endswith("</details>")
+
+
+def test_insert_toggle_places_newest_first():
+    r = storage.EMPTY_README
+    r = storage.insert_toggle(r, storage.build_readme_toggle(_q(id="Q001")))
+    r = storage.insert_toggle(r, storage.build_readme_toggle(_q(id="Q002")))
+    # 최신(Q002)이 start 마커 바로 아래 = Q001보다 위
+    assert r.index("q Q002") < r.index("q Q001")
+    assert "<!-- questions:start -->" in r and "<!-- questions:end -->" in r
