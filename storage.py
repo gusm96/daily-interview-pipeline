@@ -182,3 +182,88 @@ def insert_toggle(readme, toggle):
     anchor = _Q_START + "\n"
     idx = readme.index(anchor) + len(anchor)
     return readme[:idx] + toggle + "\n" + readme[idx:]
+
+
+AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
+_MARKER_RE = re.compile(r"<!-- q (Q\d{3,}) (\w+) ([\d-]+) -->")
+
+
+# 한 토글(리스트 아이템) 전체: 마커부터 </details>까지
+def _toggle_span_re(qid):
+    return re.compile(
+        r"-\s*<!-- q " + re.escape(qid) + r" \w+ [\d-]+ -->.*?</details>",
+        re.DOTALL,
+    )
+
+
+# 토글 내부 답변/피드백 구획 캡처
+_TOGGLE_BODY_RE = lambda qid: re.compile(
+    r"(-\s*<!-- q " + re.escape(qid) + r" \w+ [\d-]+ -->.*?### 🧑‍💻 나의 답변\n)"
+    r"(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*📄 \[전체 보기\])",
+    re.DOTALL,
+)
+
+
+def _indent2(text):
+    return "\n".join(f"  {ln}" for ln in text.splitlines()) if text else "  "
+
+
+def patch_toggle_body(readme, qid, answer, feedback, ai_auto):
+    """qid 토글의 답변/피드백 구획을 치환. ai_auto=True면 답변 앞에 AI 태그."""
+    body_answer = f"{AI_AUTO_TAG}\n{answer}" if ai_auto else answer
+    new_ans = _indent2(body_answer)
+    new_fb = _indent2(feedback)
+
+    def _repl(m):
+        return m.group(1) + new_ans + m.group(3) + new_fb + m.group(5)
+
+    new_content, n = _TOGGLE_BODY_RE(qid).subn(_repl, readme)
+    if n == 0:
+        raise ValueError(f"토글을 찾지 못함: {qid}")
+    return new_content
+
+
+def _iter_toggles(readme):
+    """(qid, slug, date, full_toggle_text) 목록."""
+    out = []
+    for m in re.finditer(
+        r"-\s*<!-- q (Q\d{3,}) (\w+) ([\d-]+) -->.*?</details>", readme, re.DOTALL
+    ):
+        out.append((m.group(1), m.group(2), m.group(3), m.group(0)))
+    return out
+
+
+def prune_expired(readme, cutoff_iso):
+    """마커 date < cutoff_iso인 토글을 README에서 제거."""
+    for qid, slug, date, toggle in _iter_toggles(readme):
+        if date < cutoff_iso:
+            readme = readme.replace(toggle + "\n", "").replace(toggle, "")
+    return readme
+
+
+def scan_window_unanswered(readme):
+    """답변 공백 AND AI 태그 없음인 토글 → (qid, slug, date, title, question)."""
+    out = []
+    for qid, slug, date, toggle in _iter_toggles(readme):
+        body = _TOGGLE_BODY_RE(qid).search(readme)
+        if not body:
+            continue
+        answer_seg = body.group(2)
+        if answer_seg.strip() != "" or AI_AUTO_TAG in answer_seg:
+            continue
+        title_m = re.search(r"</b>\s*.*?\|\s*(.*?)\s*<i>", toggle)
+        q_m = re.search(r"\*\*Q\.\*\*\s*(.*?)\s*\n", toggle)
+        out.append((qid, slug, date,
+                    title_m.group(1) if title_m else "",
+                    q_m.group(1).strip() if q_m else ""))
+    return out
+
+
+def marker_info(readme, qid):
+    """qid 토글의 (slug, date) 또는 None."""
+    m = re.search(r"<!-- q " + re.escape(qid) + r" (\w+) ([\d-]+) -->", readme)
+    return (m.group(1), m.group(2)) if m else None
+
+
+def has_toggle(readme, qid):
+    return marker_info(readme, qid) is not None

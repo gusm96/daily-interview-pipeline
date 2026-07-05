@@ -122,3 +122,58 @@ def test_insert_toggle_places_newest_first():
     # 최신(Q002)이 start 마커 바로 아래 = Q001보다 위
     assert r.index("q Q002") < r.index("q Q001")
     assert "<!-- questions:start -->" in r and "<!-- questions:end -->" in r
+
+
+def _readme_with(*questions):
+    r = storage.EMPTY_README
+    for q in questions:
+        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
+    return r
+
+
+def test_patch_toggle_body_fills_answer_feedback():
+    r = _readme_with(_q(id="Q001"))
+    r2 = storage.patch_toggle_body(r, "Q001", "내 답변", "AI 피드백", ai_auto=False)
+    assert "내 답변" in r2 and "AI 피드백" in r2
+    # 마커/요약은 보존
+    assert "q Q001 CS 2026-07-05" in r2
+
+
+def test_patch_toggle_body_only_targets_qid():
+    r = _readme_with(_q(id="Q001", question="질문1"), _q(id="Q002", question="질문2"))
+    r2 = storage.patch_toggle_body(r, "Q002", "답변2", "피드백2", ai_auto=True)
+    # Q001 토글 본문은 그대로(빈 답변 유지)
+    seg = r2[r2.index("q Q001"):r2.index("q Q002") if r2.index("q Q001") < r2.index("q Q002") else len(r2)]
+    assert "답변2" not in seg
+
+
+def test_scan_window_unanswered_lists_empty_only():
+    r = _readme_with(_q(id="Q001"), _q(id="Q002"))
+    r = storage.patch_toggle_body(r, "Q001", "답함", "피드백", ai_auto=False)
+    out = storage.scan_window_unanswered(r)
+    ids = [t[0] for t in out]
+    assert ids == ["Q002"]           # Q001은 답변 있음 → 제외
+    qid, slug, date, title, question = out[0]
+    assert slug == "CS" and date == "2026-07-05"
+    assert question == "흐름제어와 혼잡제어의 차이는?"
+
+
+def test_scan_window_excludes_ai_auto():
+    r = _readme_with(_q(id="Q001"))
+    r = storage.patch_toggle_body(r, "Q001", "AI답", "(AI 자동 작성 - 검토 필요)", ai_auto=True)
+    assert storage.scan_window_unanswered(r) == []
+
+
+def test_prune_expired_removes_old_toggles():
+    r = _readme_with(_q(id="Q001", date="2026-06-01"), _q(id="Q009", date="2026-07-05"))
+    r2 = storage.prune_expired(r, "2026-06-29")   # cutoff 이전 = 만료
+    assert "q Q001" not in r2
+    assert "q Q009" in r2
+
+
+def test_marker_info_and_has_toggle():
+    r = _readme_with(_q(id="Q007", date="2026-07-04"))
+    assert storage.marker_info(r, "Q007") == ("CS", "2026-07-04")
+    assert storage.marker_info(r, "Q999") is None
+    assert storage.has_toggle(r, "Q007") is True
+    assert storage.has_toggle(r, "Q999") is False
