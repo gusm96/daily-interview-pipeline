@@ -377,6 +377,25 @@ def _readme_url():
     return f"{GITHUB_API}/repos/{owner}/{name}/contents/README.md"
 
 
+def _contents_url(path):
+    owner = os.environ.get("REPO_OWNER", "")
+    name = os.environ.get("REPO_NAME", "")
+    return f"{GITHUB_API}/repos/{owner}/{name}/contents/{path}"
+
+
+def github_get_file(path):
+    """path 파일의 (디코딩 content, sha) 반환. 404면 (None, None)."""
+    resp = _request_with_retry(
+        lambda: requests.get(_contents_url(path), headers=_github_headers(), timeout=10)
+    )
+    if resp.status_code == 404:
+        return None, None
+    if not resp.ok:
+        raise GitHubError(f"파일 조회 실패({path}): {resp.status_code}")
+    data = resp.json()
+    return base64.b64decode(data["content"]).decode("utf-8"), data["sha"]
+
+
 def github_get_readme():
     """README content(디코딩) + sha 반환."""
     resp = _request_with_retry(
