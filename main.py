@@ -12,6 +12,7 @@ import requests
 import time
 from slack_sdk import WebClient
 from prompts import CATEGORIES, QUESTION_GENERATION_PROMPT, MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
+import storage
 
 
 
@@ -603,6 +604,24 @@ def extract_question_from_parent(parent_text):
     if idx == -1:
         return parent_text.strip()
     return parent_text[idx + 1:].strip()
+
+
+# 부모 카드: *[Qxxx] 카테고리 | 제목*  (카테고리는 CATEGORIES 원문 중 하나)
+_PARENT_HEADER_RE = re.compile(r"\[Q\d{3,}\]\s*(.+?)\s*\|\s*(.+?)\*")
+
+
+def parse_parent_header(parent_text):
+    """부모 카드에서 (qid, category, title) 추출. 카테고리 미확인 시 (qid, None, None)."""
+    qid = parse_question_id(parent_text)
+    if not qid:
+        return None, None, None
+    m = _PARENT_HEADER_RE.search(parent_text or "")
+    if not m:
+        return qid, None, None
+    category = m.group(1).strip()
+    if category not in storage.CATEGORY_SLUGS:
+        return qid, None, None
+    return qid, category, m.group(2).strip()
 
 
 def handle_slack_event(payload):

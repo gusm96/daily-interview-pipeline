@@ -117,3 +117,20 @@ def test_extract_question_from_parent_handles_empty():
     assert main.extract_question_from_parent(None) == ""
 
 
+def test_parse_parent_header_full():
+    qid, cat, title = main.parse_parent_header(
+        "*[Q002] 🖥️ CS (네트워크/OS) | OSI 7계층*\nOSI 7계층을 설명하라.")
+    assert qid == "Q002"
+    assert cat == "🖥️ CS (네트워크/OS)"
+    assert title == "OSI 7계층"
+
+
+def test_parse_parent_header_no_category():
+    qid, cat, title = main.parse_parent_header("오늘의 질문 [Q005] 입니다\n본문")
+    assert qid == "Q005" and cat is None and title is None
+
+
+def test_parse_parent_header_no_qid():
+    assert main.parse_parent_header("ID 없음") == (None, None, None)
+
+
