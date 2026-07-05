@@ -554,6 +554,24 @@ def generate_questions(readme, count=5):
 _MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차 Gemini 누적→타임아웃 방지)
 
 
+def _generate_and_stage(readme, count, today, files=None):
+    """신규 질문 count개를 생성해 (files, ids, questions, new_readme) 반환. 채점/모범답안 없음.
+    files를 넘기면(예: 루틴 A의 미답변 채움 단계에서 이미 쌓인 파일들) 이어서 누적한다."""
+    questions = generate_questions(readme, count)
+    if files is None:
+        files = {}
+    index_texts = [_index_text(files, s) for s in storage.SLUGS]
+    ids = storage.next_question_ids(index_texts, len(questions))
+    for qid, (category, title, question) in zip(ids, questions):
+        slug = storage.slug_for(category)
+        q = storage.Question(qid, slug, category, title, today, question)
+        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
+        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+            _index_text(files, slug), slug, category, qid, title, today, storage.status_label(q))
+        readme = storage.insert_toggle(readme, storage.build_readme_toggle(q))
+    return files, ids, questions, readme
+
+
 def run_generate_routine():
     """루틴 A: 미답변 자동 모범답안 + 신규 질문 생성 → 파일/인덱스/README 1커밋 → Slack."""
     missing = validate_env()
@@ -582,18 +600,7 @@ def run_generate_routine():
 
     # 2) 신규 질문 생성 (config default, 1~10 클램프)
     count = max(1, min(10, get_config_default(readme)))
-    questions = generate_questions(readme, count)
-    index_texts = [_index_text(files, s) for s in storage.SLUGS]
-    ids = storage.next_question_ids(index_texts, len(questions))
-
-    for qid, (category, title, question) in zip(ids, questions):
-        slug = storage.slug_for(category)
-        q = storage.Question(qid, slug, category, title, today, question)
-        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
-        idx_text = _index_text(files, slug)
-        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
-            idx_text, slug, category, qid, title, today, storage.status_label(q))
-        readme = storage.insert_toggle(readme, storage.build_readme_toggle(q))
+    files, ids, questions, readme = _generate_and_stage(readme, count, today, files)
 
     # 3) 창 벗어난 토글 prune
     cutoff = (datetime.fromisoformat(today) - timedelta(days=storage.README_WINDOW_DAYS - 1)).date().isoformat()
@@ -749,36 +756,38 @@ def handle_app_mention(event):
         return
 
     if command == "config_show":
-        content, _ = github_get_readme()
-        reply(f"현재 기본 생성 개수: {get_config_default(content)}개")
+        readme, _ = github_get_file("README.md")
+        reply(f"현재 기본 생성 개수: {get_config_default(readme or '')}개")
         return
 
     if command == "config_set":
         if arg is None or arg < 1 or arg > 10:
             reply("기본 생성 개수는 1~10 사이로 입력해주세요. 예: `@봇 config --default=5`")
             return
-        github_commit_with_retry(lambda c: set_config_default(c, arg), f"config default={arg}")
+        readme, _ = github_get_file("README.md")
+        new_readme, _ = set_config_default(readme or storage.EMPTY_README, arg)
+        github_commit_files({"README.md": new_readme}, f"config default={arg}")
         reply(f"기본 생성 개수가 {arg}개로 설정되었습니다.")
         return
 
     if command == "question":
-        content, _ = github_get_readme()
-        n = arg if arg is not None else get_config_default(content)
+        readme, _ = github_get_file("README.md")
+        readme = readme or storage.EMPTY_README
+        n = arg if arg is not None else get_config_default(readme)
         if n < 1 or n > 10:
             reply("질문 개수는 1~10 사이로 입력해주세요. 예: `@봇 질문 3`")
             return
-        questions = generate_questions(content, n)
         today = today_kst_iso()
-        _, assigned_ids = github_commit_with_retry(
-            partial(append_questions, questions, date_str=today), "add questions on demand"
-        )
+        files, ids, questions, new_readme = _generate_and_stage(readme, n, today)
+        files["README.md"] = new_readme
+        github_commit_files(files, "add questions on demand")
         # 질문은 채널 최상위로 전송 (루틴 B의 [Q###] 매핑 보존)
-        for qid, (category, title, question) in zip(assigned_ids, questions):
+        for qid, (category, title, question) in zip(ids, questions):
             try:
                 slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
             except Exception:
                 logger.exception("Slack 질문 전송 실패: %s", qid)
-        reply(f"질문 {len(assigned_ids)}개를 추가했습니다.")
+        reply(f"질문 {len(ids)}개를 추가했습니다.")
         return
 
     reply("모르는 명령입니다. `@봇 help` 를 입력해 사용법을 확인하세요.")
