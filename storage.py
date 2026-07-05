@@ -1,4 +1,5 @@
 """파일 기반 문제 저장소의 순수 렌더/파싱 로직. I/O(네트워크·환경변수) 없음."""
+import re
 from dataclasses import dataclass
 
 README_WINDOW_DAYS = 7
@@ -46,3 +47,56 @@ def status_label(q):
     if q.ai_auto:
         return "🤖 자동답안"
     return "⬜ 미답변"
+
+
+_META_RE = re.compile(
+    r"<!--\s*meta id=(?P<id>Q\d{3,}) slug=(?P<slug>\w+) date=(?P<date>[\d-]+) "
+    r"answered=(?P<answered>true|false) ai_auto=(?P<ai>true|false)\s*-->"
+)
+# 파일 본문 파싱: 질문 / 나의 답변 / AI 피드백 구획
+_QFILE_BODY_RE = re.compile(
+    r"\*\*Q\.\*\*\s*(?P<question>.*?)\s*"
+    r"## 🧑‍💻 나의 답변\s*(?P<answer>.*?)\s*"
+    r"## 🤖 AI 피드백\s*(?P<feedback>.*?)\s*$",
+    re.DOTALL,
+)
+
+
+def render_question_file(q):
+    """Question → 개별 문제 파일 마크다운. parse_question_file과 왕복 가능."""
+    meta = (f"<!-- meta id={q.id} slug={q.slug} date={q.date} "
+            f"answered={str(q.answered).lower()} ai_auto={str(q.ai_auto).lower()} -->")
+    answer = q.answer if q.answer else ""
+    feedback = q.feedback if q.feedback else ""
+    return (
+        f"{meta}\n"
+        f"# [{q.id}] {q.title}\n\n"
+        f"> {q.category} · {q.date}\n\n"
+        f"**Q.** {q.question}\n\n"
+        f"## 🧑‍💻 나의 답변\n\n{answer}\n\n"
+        f"## 🤖 AI 피드백\n\n{feedback}\n"
+    )
+
+
+def parse_question_file(text):
+    """개별 문제 파일 마크다운 → Question. 포맷 불일치 시 ValueError."""
+    m = _META_RE.search(text)
+    if not m:
+        raise ValueError("문제 파일 메타를 찾지 못함")
+    title_m = re.search(r"#\s*\[Q\d{3,}\]\s*(.+)", text)
+    body_m = _QFILE_BODY_RE.search(text)
+    if not title_m or not body_m:
+        raise ValueError("문제 파일 본문 파싱 실패")
+    slug = m.group("slug")
+    return Question(
+        id=m.group("id"),
+        slug=slug,
+        category=category_for_slug(slug),
+        title=title_m.group(1).strip(),
+        date=m.group("date"),
+        question=body_m.group("question").strip(),
+        answer=body_m.group("answer").strip(),
+        feedback=body_m.group("feedback").strip(),
+        answered=m.group("answered") == "true",
+        ai_auto=m.group("ai") == "true",
+    )
