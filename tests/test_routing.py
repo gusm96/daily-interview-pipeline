@@ -145,6 +145,43 @@ def test_handle_slack_event_grades_and_commits(monkeypatch):
     assert "OSI는 7계층입니다" in files["README.md"]            # README 토글 패치(창 안)
 
 
+def test_handle_slack_event_persists_when_readme_toggle_malformed(monkeypatch):
+    # 마커는 있으나 토글 본문이 손상돼 patch_toggle_body가 ValueError면,
+    # README는 건너뛰되 문제 파일/인덱스 커밋은 유지되어야 한다(채점 유실 방지).
+    import storage
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(main, "slack_get_thread_parent",
+                        lambda ch, ts: "*[Q002] 🖥️ CS (네트워크/OS) | OSI 7계층*\nOSI 7계층을 설명하라.")
+    monkeypatch.setattr(main, "call_gemini",
+                        lambda p, temperature, response_schema=None, thinking_budget=0: "피드백")
+    q = storage.Question("Q002", "CS", storage.category_for_slug("CS"),
+                         "OSI 7계층", "2026-07-05", "OSI 7계층을 설명하라.")
+    qfile = storage.render_question_file(q)
+    # 마커만 있고 '나의 답변' 구획이 없는 손상된 토글
+    malformed = "- <!-- q Q002 CS 2026-07-05 --><details><summary>깨짐</summary>\n  본문\n  </details>"
+    readme = storage.insert_toggle(storage.EMPTY_README, malformed)
+
+    def fake_get_file(path):
+        return {"README.md": (readme, "s"), "CS/Q002.md": (qfile, "s"),
+                "CS/CS.md": ("", None)}.get(path, (None, None))
+
+    committed = {}
+    monkeypatch.setattr(main, "github_get_file", fake_get_file)
+    monkeypatch.setattr(main, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files))
+
+    payload = {"event": {"type": "message", "user": "UHUMAN", "text": "내 답변",
+                         "thread_ts": "111.1", "ts": "111.2", "channel": "C1"}}
+    main.handle_slack_event(payload)  # 크래시 없이 완료
+
+    files = committed["files"]
+    assert "내 답변" in files["CS/Q002.md"]     # 문제 파일은 커밋됨
+    assert "CS/CS.md" in files                   # 인덱스도 커밋됨
+    assert "README.md" not in files              # 손상 토글은 건너뜀
+
+
 def test_handle_slack_event_passes_question_and_thinking_budget(monkeypatch):
     import storage
     monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")

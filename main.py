@@ -551,10 +551,14 @@ def handle_slack_event(payload):
     idx_text, _ = github_get_file(f"{slug}/{slug}.md")
     files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
         idx_text or "", slug, q.category, qid, q.title, q.date, storage.status_label(q))
-    # README 토글(창 안일 때만)
+    # README 토글(창 안일 때만). 토글 본문이 손상돼 패치가 실패해도 문제 파일/인덱스
+    # 커밋은 유지되도록 국소 try로 감싼다(채점 결과 유실 방지).
     readme, _ = github_get_file("README.md")
     if readme and storage.has_toggle(readme, qid):
-        files["README.md"] = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=False)
+        try:
+            files["README.md"] = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=False)
+        except ValueError:
+            logger.warning("README 토글 패치 실패(본문 손상 가능), 문제 파일만 갱신: %s", qid)
 
     try:
         github_commit_files(files, f"update {qid} answer")
