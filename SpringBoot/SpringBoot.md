@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 11개)
+# 🌱 Spring Boot — 전체 문제 (총 12개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q053](./Q053.md) | Spring Data JPA Auditing 활용 | 2026-07-06 | ⬜ 미답변 |
+| [Q058](./Q058.md) | Spring AOP 동작 원리와 활용 | 2026-07-07 | ⬜ 미답변 |
+| [Q053](./Q053.md) | Spring Data JPA Auditing 활용 | 2026-07-06 | 🤖 자동답안 |
 | [Q048](./Q048.md) | Spring Data JPA Auditing 활용 | 2026-07-05 | 🤖 자동답안 |
 | [Q043](./Q043.md) | Spring Event Listener와 비동기 처리 | 2026-07-04 | 🤖 자동답안 |
 | [Q038](./Q038.md) | Spring Data JPA Auditing 활용 | 2026-07-03 | 🤖 자동답안 |
