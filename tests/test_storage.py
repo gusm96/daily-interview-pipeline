@@ -58,6 +58,20 @@ def test_question_file_roundtrip_ai_auto():
     assert parsed == q
 
 
+def test_render_question_file_shows_ai_auto_tag():
+    # 자동 모범답안임을 눈에 보이게 표시해야 "나의 답변"으로 오인되지 않는다
+    q = _q(answer="AI 모범답안", feedback="(AI 자동 작성 - 검토 필요)", ai_auto=True)
+    text = storage.render_question_file(q)
+    assert storage.AI_AUTO_TAG in text
+    parsed = storage.parse_question_file(text)
+    assert storage.AI_AUTO_TAG not in parsed.answer  # Question.answer 필드 자체는 태그 없이 깨끗
+
+
+def test_render_question_file_no_tag_when_answered_by_human():
+    q = _q(answer="내가 직접 쓴 답변", answered=True)
+    assert storage.AI_AUTO_TAG not in storage.render_question_file(q)
+
+
 def test_question_file_has_meta_and_heading():
     text = storage.render_question_file(_q())
     assert text.startswith("<!-- meta id=Q001 slug=CS date=2026-07-05 "
@@ -113,6 +127,12 @@ def test_toggle_has_marker_and_summary():
            "<i>(2026-07-05)</i></summary>" in tog
     assert "📄 [전체 보기](./CS/Q015.md)" in tog
     assert tog.rstrip().endswith("</details>")
+
+
+def test_build_readme_toggle_shows_ai_auto_tag():
+    q = _q(id="Q015", answer="AI 모범답안", feedback="(AI 자동 작성 - 검토 필요)", ai_auto=True)
+    tog = storage.build_readme_toggle(q)
+    assert storage.AI_AUTO_TAG in tog
 
 
 def test_insert_toggle_places_newest_first():

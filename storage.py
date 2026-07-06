@@ -67,6 +67,8 @@ def render_question_file(q):
     meta = (f"<!-- meta id={q.id} slug={q.slug} date={q.date} "
             f"answered={str(q.answered).lower()} ai_auto={str(q.ai_auto).lower()} -->")
     answer = q.answer if q.answer else ""
+    if q.ai_auto:
+        answer = f"{AI_AUTO_TAG}\n{answer}" if answer else AI_AUTO_TAG
     feedback = q.feedback if q.feedback else ""
     return (
         f"{meta}\n"
@@ -88,6 +90,10 @@ def parse_question_file(text):
     if not title_m or not body_m:
         raise ValueError("문제 파일 본문 파싱 실패")
     slug = m.group("slug")
+    ai_auto = m.group("ai") == "true"
+    answer = body_m.group("answer").strip()
+    if ai_auto and answer.startswith(AI_AUTO_TAG):
+        answer = answer[len(AI_AUTO_TAG):].strip()
     return Question(
         id=m.group("id"),
         slug=slug,
@@ -95,10 +101,10 @@ def parse_question_file(text):
         title=title_m.group(1).strip(),
         date=m.group("date"),
         question=body_m.group("question").strip(),
-        answer=body_m.group("answer").strip(),
+        answer=answer,
         feedback=body_m.group("feedback").strip(),
         answered=m.group("answered") == "true",
-        ai_auto=m.group("ai") == "true",
+        ai_auto=ai_auto,
     )
 
 
@@ -159,6 +165,8 @@ EMPTY_README = (
 def build_readme_toggle(q):
     """Question → README 롤링 윈도우용 토글(리스트 아이템). 첫 줄에 기계 판독 마커."""
     answer = q.answer if q.answer else ""
+    if q.ai_auto:
+        answer = f"{AI_AUTO_TAG}\n{answer}" if answer else AI_AUTO_TAG
     feedback = q.feedback if q.feedback else ""
     ans_block = "\n".join(f"  {ln}" for ln in answer.splitlines()) if answer else "  "
     fb_block = "\n".join(f"  {ln}" for ln in feedback.splitlines()) if feedback else "  "
