@@ -22,6 +22,12 @@ _BLOCK_RE = re.compile(
 _AI_TAG = storage.AI_AUTO_TAG
 
 
+def _dedent_block(text):
+    """구 README `<details>` 리스트 항목 안 2칸 들여쓰기를 줄 단위로 제거."""
+    lines = [line[2:] if line.startswith("  ") else line for line in text.split("\n")]
+    return "\n".join(lines).strip()
+
+
 def _parse_old(old_readme):
     """구 README → [Question]. 카테고리는 직전 ## 섹션 헤더로 판정."""
     # 각 블록의 시작 위치에서 가장 가까운 앞선 섹션 헤더를 카테고리로 사용
@@ -36,7 +42,7 @@ def _parse_old(old_readme):
                 break
         if cat not in storage.CATEGORY_SLUGS:
             continue
-        answer = m.group("answer").strip()
+        answer = _dedent_block(m.group("answer"))
         ai_auto = answer.startswith(_AI_TAG)
         if ai_auto:
             answer = answer[len(_AI_TAG):].strip()
@@ -45,7 +51,7 @@ def _parse_old(old_readme):
             title=m.group("title").strip(), date=m.group("date"),
             question=m.group("question").strip(),
             answer=answer,
-            feedback=m.group("feedback").strip(),
+            feedback=_dedent_block(m.group("feedback")),
             answered=bool(answer) and not ai_auto,
             ai_auto=ai_auto,
         ))

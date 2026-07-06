@@ -54,3 +54,20 @@ def test_migration_detects_ai_auto_and_strips_tag():
     assert q.answered is False
     assert storage.AI_AUTO_TAG not in q.answer
     assert "캐시는 임시 저장소입니다." in q.answer
+
+
+# 실제 README는 <details> 리스트 항목 안에 있어 답변/피드백 각 줄에 2칸 들여쓰기가 붙는다
+OLD_INDENTED = (
+    "## 🖥️ CS (네트워크/OS)\n\n"
+    "- <details><summary><b>[Q004]</b> 스레드 풀 <i>(2026-07-05)</i></summary>\n\n"
+    "  **Q.** 스레드 풀이란?\n\n  ### 🧑‍💻 나의 답변\n"
+    "  ## 핵심 정의\n  \n  스레드 풀은 재사용 가능한 스레드 집합입니다.\n\n"
+    "  ### 🤖 AI 피드백\n  총평입니다.\n  \n  세부 피드백입니다.\n  </details>\n\n"
+)
+
+
+def test_migration_dedents_indented_answer_and_feedback():
+    files = build_migration(OLD_INDENTED, "2026-07-05")
+    q = storage.parse_question_file(files["CS/Q004.md"])
+    assert q.answer == "## 핵심 정의\n\n스레드 풀은 재사용 가능한 스레드 집합입니다."
+    assert q.feedback == "총평입니다.\n\n세부 피드백입니다."
