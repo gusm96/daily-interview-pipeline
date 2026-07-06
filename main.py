@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 import functions_framework
 import hashlib
 import hmac
-from functools import partial
 import json
 import logging
 import os
@@ -12,6 +11,7 @@ import requests
 import time
 from slack_sdk import WebClient
 from prompts import CATEGORIES, QUESTION_GENERATION_PROMPT, MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
+import storage
 
 
 
@@ -47,9 +47,6 @@ def parse_question_id(text):
     return f"Q{m.group(1)}" if m else None
 
 
-# 질문 헤더 라인만 스캔 (M-2): "- <details><summary><b>[Q###] ..." 형태만 매칭
-_HEADER_ID_RE = re.compile(r"^\s*-\s*<details><summary><b>\[Q(\d{3,})\]", re.MULTILINE)
-
 _CONFIG_DEFAULT_RE = re.compile(r"<!--\s*config:default=(\d+)\s*-->")
 _MENTION_TOKEN_RE = re.compile(r"<@[\w]+>")
 _CONFIG_SET_RE = re.compile(r"--default=(-?\d+)")
@@ -63,8 +60,7 @@ def get_config_default(readme):
 
 
 def set_config_default(readme, n):
-    """config:default 마커를 갱신(없으면 README 상단에 삽입). (new_content, n) 반환.
-    github_commit_with_retry(lambda c: set_config_default(c, n))로 사용."""
+    """config:default 마커를 갱신(없으면 README 상단에 삽입). (new_content, n) 반환."""
     marker = f"<!-- config:default={n} -->"
     if _CONFIG_DEFAULT_RE.search(readme or ""):
         return _CONFIG_DEFAULT_RE.sub(marker, readme), n
@@ -99,116 +95,6 @@ def build_help_text():
         "💬 *답변 방법*: 봇이 보낸 질문 메시지에 *스레드 답글*로 답하면 AI가 채점·피드백합니다.\n"
         "ℹ️ 답변하지 않은 질문은 다음 날 오전 7시에 AI 모범답안이 자동 작성됩니다."
     )
-
-
-def next_question_ids(readme, count):
-    """README의 질문 헤더 라인만 스캔해 최대 ID+1부터 count개 ID 반환."""
-    nums = [int(n) for n in _HEADER_ID_RE.findall(readme or "")]
-    start = (max(nums) + 1) if nums else 1
-    return [f"Q{n:03d}" for n in range(start, start + count)]
-
-
-def build_question_block(qid, title, question, date_str):
-    """스펙 §7 접이식 질문 블록 마크다운 생성. 토글 요약엔 짧은 제목, 펼치면 전체 질문 + 답변/피드백 칸."""
-    return (
-        f"- <details><summary><b>[{qid}]</b> {title} <i>({date_str})</i></summary>\n"
-        f"  \n"
-        f"  **Q.** {question}\n"
-        f"  \n"
-        f"  ### 🧑‍💻 나의 답변\n"
-        f"  \n"
-        f"  ### 🤖 AI 피드백\n"
-        f"  \n"
-        f"  </details>"
-    )
-
-
-AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
-
-# 한 질문 블록 전체를 캡처: summary의 ID + details 내부의 전체 질문(**Q.**) + 답변 본문
-_BLOCK_RE = re.compile(
-    r"<summary><b>\[(Q\d{3,})\]</b>.*?\*\*Q\.\*\*\s*(.*?)\s*"
-    r"### 🧑‍💻 나의 답변\s*(.*?)\s*### 🤖 AI 피드백",
-    re.DOTALL,
-)
-
-
-def find_unanswered_questions(readme):
-    """(qid, 질문텍스트) 목록 반환. 조건: 답변 본문 공백 AND AI 자동 태그 없음 (C-3)."""
-    out = []
-    for qid, question, answer_body in _BLOCK_RE.findall(readme or ""):
-        body = answer_body.strip()
-        if body == "" and AI_AUTO_TAG not in answer_body:
-            out.append((qid, question.strip()))
-    return out
-
-
-def update_answer_block(readme, qid, answer, feedback):
-    """qid 블록의 '나의 답변'/'AI 피드백' 칸을 치환. (new_content, None) 반환.
-    AI 자동 태그가 있으면 제거(C-3). 대상 미존재/치환 실패 시 ValueError(Mi-1)."""
-    # 해당 qid 블록의 details 내부 구간만 치환
-    block_pat = re.compile(
-        r"(-\s*<details><summary><b>\[" + re.escape(qid) + r"\]</b>.*?"
-        r"### 🧑‍💻 나의 답변\n)(.*?)(\n\s*### 🤖 AI 피드백\n)(.*?)(\n\s*</details>)",
-        re.DOTALL,
-    )
-    # 각 줄마다 2칸씩 들여쓰기 적용 (빈 줄도 들여쓰기하여 마크다운 양식 일관성 유지)
-    indented_answer_lines = [f"  {line}" for line in answer.splitlines()]
-    indented_answer = "\n".join(indented_answer_lines) if indented_answer_lines else "  "
-    new_answer = f"{indented_answer}\n"
-
-    indented_feedback_lines = [f"  {line}" for line in feedback.splitlines()]
-    indented_feedback = "\n".join(indented_feedback_lines) if indented_feedback_lines else "  "
-    new_feedback = f"{indented_feedback}\n"
-
-    def _repl(m):
-        return m.group(1) + new_answer + m.group(3) + new_feedback + m.group(5)
-
-    new_content, n = block_pat.subn(_repl, readme)
-    if n == 0:
-        raise ValueError(f"질문 블록을 찾지 못함: {qid}")
-    return new_content, None
-
-
-def append_questions(questions, readme, date_str=None):
-    """mutate_fn(partial(append_questions, questions, date_str=...)). 최신 readme 기준으로
-    ID를 재할당해 카테고리 섹션 아래 append. (new_content, 할당된 ID 목록) 반환 (C-1).
-    카테고리 섹션이 없으면 생성 (Mi-4/S-5)."""
-    if date_str is None:
-        date_str = today_kst_iso()
-
-    content = readme if readme.endswith("\n") else readme + "\n"
-    ids = next_question_ids(content, len(questions))
-
-    for qid, (category, title, question) in zip(ids, questions):
-        block = build_question_block(qid, title, question, date_str)
-        header = f"## {category}"
-        if header in content:
-            # 해당 카테고리 섹션 헤더 라인 바로 뒤에 삽입
-            idx = content.index(header) + len(header)
-            # 헤더 줄 끝(다음 개행)까지 이동
-            nl = content.index("\n", idx)
-            content = content[: nl + 1] + "\n" + block + "\n" + content[nl + 1 :]
-        else:
-            # 섹션 신규 생성 후 append
-            content = content.rstrip("\n") + f"\n\n{header}\n\n{block}\n"
-    return content, ids
-
-
-def fill_unanswered_questions(answer_map, readme):
-    """mutate_fn(partial(fill_unanswered_questions, answer_map)). 최신 readme에서 미답변
-    (본문 공백 AND AI 태그 없음)인 qid에만, answer_map의 답변을 AI 태그와 함께 주입.
-    (new_content, 채운 qid 목록) 반환. 이미 채워진 블록은 건너뜀(멱등, Minor-1)."""
-    content = readme
-    filled = []
-    unanswered_ids = {qid for qid, _ in find_unanswered_questions(content)}
-    for qid in unanswered_ids:
-        if qid not in answer_map:
-            continue
-        tagged = f"{AI_AUTO_TAG}\n{answer_map[qid]}"
-        content, _ = update_answer_block(content, qid, tagged, "(AI 자동 작성 - 검토 필요)")
-        filled.append(qid)
-    return content, sorted(filled)
 
 
 def verify_slack_signature(request):
@@ -371,49 +257,78 @@ def _github_headers():
     }
 
 
-def _readme_url():
+def _contents_url(path):
     owner = os.environ.get("REPO_OWNER", "")
     name = os.environ.get("REPO_NAME", "")
-    return f"{GITHUB_API}/repos/{owner}/{name}/contents/README.md"
+    return f"{GITHUB_API}/repos/{owner}/{name}/contents/{path}"
 
 
-def github_get_readme():
-    """README content(디코딩) + sha 반환."""
+def github_get_file(path):
+    """path 파일의 (디코딩 content, sha) 반환. 404면 (None, None)."""
     resp = _request_with_retry(
-        lambda: requests.get(_readme_url(), headers=_github_headers(), timeout=10)
+        lambda: requests.get(_contents_url(path), headers=_github_headers(), timeout=10)
     )
+    if resp.status_code == 404:
+        return None, None
     if not resp.ok:
-        raise GitHubError(f"README 조회 실패: {resp.status_code}")
+        raise GitHubError(f"파일 조회 실패({path}): {resp.status_code}")
     data = resp.json()
-    content = base64.b64decode(data["content"]).decode("utf-8")
-    return content, data["sha"]
+    return base64.b64decode(data["content"]).decode("utf-8"), data["sha"]
 
 
-def github_commit_with_retry(mutate_fn, message, max_retries=3):
-    """README 조회 → (new, result)=mutate_fn(content) → PUT. 409 시 재조회·재적용·재시도.
-    성공 시 (new_content, result) 반환 (C-1/C-2)."""
+def _git_url(suffix):
+    owner = os.environ.get("REPO_OWNER", "")
+    name = os.environ.get("REPO_NAME", "")
+    return f"{GITHUB_API}/repos/{owner}/{name}/git/{suffix}"
+
+
+def github_commit_files(files, message, branch=None, max_retries=3):
+    """files({path: content})를 1커밋으로 원자적 반영. 새 커밋 sha 반환.
+    ref 업데이트가 non-fast-forward(422/409)면 처음부터 재시도(C-2 대체)."""
+    branch = branch or os.environ.get("REPO_BRANCH", "main")
+    headers = _github_headers()
+    ref_suffix = f"refs/heads/{branch}"
     for attempt in range(max_retries):
-        content, sha = github_get_readme()
-        new_content, result = mutate_fn(content)
-        payload = {
-            "message": message,
-            "content": base64.b64encode(new_content.encode("utf-8")).decode(),
-            "sha": sha,
-        }
-        resp = _request_with_retry(
-            lambda: requests.put(
-                _readme_url(), headers=_github_headers(), json=payload, timeout=10
-            )
-        )
-        if resp.ok:
-            logger.info("GitHub 커밋 성공: %s", message)
-            return new_content, result
-        if resp.status_code == 409:
-            logger.warning("GitHub 409 충돌, 재시도 %d/%d", attempt + 1, max_retries)
+        ref = _request_with_retry(
+            lambda: requests.get(_git_url(f"ref/heads/{branch}"), headers=headers, timeout=10))
+        if not ref.ok:
+            raise GitHubError(f"ref 조회 실패: {ref.status_code}")
+        base_sha = ref.json()["object"]["sha"]
+        commit = _request_with_retry(
+            lambda: requests.get(_git_url(f"commits/{base_sha}"), headers=headers, timeout=10))
+        if not commit.ok:
+            raise GitHubError(f"base commit 조회 실패: {commit.status_code}")
+        base_tree = commit.json()["tree"]["sha"]
+
+        tree_entries = [
+            {"path": path, "mode": "100644", "type": "blob", "content": content}
+            for path, content in files.items()
+        ]
+        tree = _request_with_retry(lambda: requests.post(
+            _git_url("trees"), headers=headers,
+            json={"base_tree": base_tree, "tree": tree_entries}, timeout=10))
+        if not tree.ok:
+            raise GitHubError(f"tree 생성 실패: {tree.status_code}")
+        new_commit = _request_with_retry(lambda: requests.post(
+            _git_url("commits"), headers=headers,
+            json={"message": message, "tree": tree.json()["sha"], "parents": [base_sha]},
+            timeout=10))
+        if not new_commit.ok:
+            raise GitHubError(f"commit 생성 실패: {new_commit.status_code}")
+        new_sha = new_commit.json()["sha"]
+
+        upd = _request_with_retry(lambda: requests.patch(
+            _git_url(ref_suffix), headers=headers,
+            json={"sha": new_sha, "force": False}, timeout=10))
+        if upd.ok:
+            logger.info("Git 커밋 성공: %s (%d파일)", message, len(files))
+            return new_sha
+        if upd.status_code in (409, 422):
+            logger.warning("ref 충돌, 재시도 %d/%d", attempt + 1, max_retries)
             time.sleep(2 ** attempt)
             continue
-        raise GitHubError(f"커밋 실패: {resp.status_code}")
-    raise GitHubError("409 재시도 소진")
+        raise GitHubError(f"ref 업데이트 실패: {upd.status_code}")
+    raise GitHubError("ref 충돌 재시도 소진")
 
 
 def _slack_client():
@@ -479,45 +394,78 @@ def generate_questions(readme, count=5):
 _MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차 Gemini 누적→타임아웃 방지)
 
 
+def _generate_and_stage(readme, count, today, files=None):
+    """신규 질문 count개를 생성해 (files, ids, questions, new_readme) 반환. 채점/모범답안 없음.
+    files를 넘기면(예: 루틴 A의 미답변 채움 단계에서 이미 쌓인 파일들) 이어서 누적한다."""
+    questions = generate_questions(readme, count)
+    if files is None:
+        files = {}
+    index_texts = [_index_text(files, s) for s in storage.SLUGS]
+    ids = storage.next_question_ids(index_texts, len(questions))
+    for qid, (category, title, question) in zip(ids, questions):
+        slug = storage.slug_for(category)
+        q = storage.Question(qid, slug, category, title, today, question)
+        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
+        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+            _index_text(files, slug), slug, category, qid, title, today, storage.status_label(q))
+        readme = storage.insert_toggle(readme, storage.build_readme_toggle(q))
+    return files, ids, questions, readme
+
+
 def run_generate_routine():
-    """루틴 A: 미답변 자동 채움 → 신규 질문 생성/커밋 → Slack 전송."""
+    """루틴 A: 미답변 자동 모범답안 + 신규 질문 생성 → 파일/인덱스/README 1커밋 → Slack."""
     missing = validate_env()
     if missing:
         logger.error("필수 환경변수 누락: %s", missing)
         raise RuntimeError(f"환경변수 누락: {missing}")
 
-    # 1) 미답변 식별 + 모범답안 선생성
-    content, _ = github_get_readme()
-    unanswered = find_unanswered_questions(content)
-    if unanswered:
-        answer_map = {}
-        for qid, question in unanswered[:_MAX_FILL_PER_RUN]:
-            answer_map[qid] = call_gemini(
-                MODEL_ANSWER_PROMPT.format(question=question),
-                temperature=0.1,
-            )
-        github_commit_with_retry(
-            partial(fill_unanswered_questions, answer_map), "fill unanswered questions"
-        )
-
-    # 2) 신규 질문 생성 (ID 미확정, config default 개수 적용; 1~10 클램프 R-4)
-    content, _ = github_get_readme()
-    count = max(1, min(10, get_config_default(content)))
-    questions = generate_questions(content, count)
-
-    # 3) append 커밋 + 확정 ID 회수
+    readme, _ = github_get_file("README.md")
+    if readme is None:
+        readme = storage.EMPTY_README
+    files = {}
     today = today_kst_iso()
-    _, assigned_ids = github_commit_with_retry(
-        partial(append_questions, questions, date_str=today), "add daily questions"
-    )
 
-    # 4) Slack 전송 (확정 ID 사용)
+    # 1) 창 안 미답변 → 모범답안 생성 후 README 패치 + 문제 파일 + 인덱스
+    for qid, slug, date, title, question in storage.scan_window_unanswered(readme)[:_MAX_FILL_PER_RUN]:
+        answer = call_gemini(MODEL_ANSWER_PROMPT.format(question=question), temperature=0.1)
+        feedback = "(AI 자동 작성 - 검토 필요)"
+        readme = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=True)
+        category = storage.category_for_slug(slug)
+        q = storage.Question(qid, slug, category, title, date, question,
+                             answer=answer, feedback=feedback, ai_auto=True)
+        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
+        idx_text = _index_text(files, slug)
+        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+            idx_text, slug, category, qid, title, date, storage.status_label(q))
+
+    # 2) 신규 질문 생성 (config default, 1~10 클램프)
+    count = max(1, min(10, get_config_default(readme)))
+    files, ids, questions, readme = _generate_and_stage(readme, count, today, files)
+
+    # 3) 창 벗어난 토글 prune
+    cutoff = (datetime.fromisoformat(today) - timedelta(days=storage.README_WINDOW_DAYS - 1)).date().isoformat()
+    readme = storage.prune_expired(readme, cutoff)
+    files["README.md"] = readme
+
+    # 4) 1커밋
+    github_commit_files(files, "add daily questions")
+
+    # 5) Slack 전송
     channel = os.environ.get("SLACK_CHANNEL_ID", "")
-    for qid, (category, title, question) in zip(assigned_ids, questions):
+    for qid, (category, title, question) in zip(ids, questions):
         try:
             slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
         except Exception:
             logger.exception("Slack 질문 전송 실패: %s", qid)
+
+
+def _index_text(files, slug):
+    """커밋 대기 중 files dict에 있으면 그걸, 없으면 원격 인덱스를 조회(없으면 '')."""
+    path = f"{slug}/{slug}.md"
+    if path in files:
+        return files[path]
+    text, _ = github_get_file(path)
+    return text or ""
 
 
 def extract_question_from_parent(parent_text):
@@ -531,8 +479,35 @@ def extract_question_from_parent(parent_text):
     return parent_text[idx + 1:].strip()
 
 
+# 부모 카드: *[Qxxx] 카테고리 | 제목*  (카테고리는 CATEGORIES 원문 중 하나)
+_PARENT_HEADER_RE = re.compile(r"\[Q\d{3,}\]\s*(.+?)\s*\|\s*(.+?)\*")
+
+
+def parse_parent_header(parent_text):
+    """부모 카드에서 (qid, category, title) 추출. 카테고리 미확인 시 (qid, None, None)."""
+    qid = parse_question_id(parent_text)
+    if not qid:
+        return None, None, None
+    m = _PARENT_HEADER_RE.search(parent_text or "")
+    if not m:
+        return qid, None, None
+    category = m.group(1).strip()
+    if category not in storage.CATEGORY_SLUGS:
+        return qid, None, None
+    return qid, category, m.group(2).strip()
+
+
+def _find_slug_for_qid(qid):
+    """카테고리 미확인 시 5개 인덱스를 스캔해 qid가 속한 slug를 찾음. 없으면 None."""
+    for slug in storage.SLUGS:
+        text, _ = github_get_file(f"{slug}/{slug}.md")
+        if text and qid in text:
+            return slug
+    return None
+
+
 def handle_slack_event(payload):
-    """루틴 B: 답변 추출 → ID 매핑 → Gemini 채점 → Slack 피드백 + README 갱신."""
+    """루틴 B: 답변 추출 → 채점 → Slack 피드백 + 문제 파일/인덱스/README 1커밋."""
     event = payload.get("event", {})
     answer = extract_user_answer(event)
     if not answer:
@@ -542,32 +517,53 @@ def handle_slack_event(payload):
     channel = event.get("channel", "")
     thread_ts = event.get("thread_ts")
     parent_text = slack_get_thread_parent(channel, thread_ts)
-    qid = parse_question_id(parent_text)
+    qid, category, title = parse_parent_header(parent_text)
     if not qid:
         logger.info("부모 메시지에서 질문 ID를 찾지 못함")
         return
 
-    question = extract_question_from_parent(parent_text)
+    slug = storage.slug_for(category) if category else _find_slug_for_qid(qid)
+    if not slug:
+        logger.warning("qid의 카테고리를 찾지 못함: %s", qid)
+        return
+
+    qfile_text, _ = github_get_file(f"{slug}/{qid}.md")
+    if not qfile_text:
+        logger.warning("문제 파일 없음: %s/%s.md", slug, qid)
+        return
+    q = storage.parse_question_file(qfile_text)
+
     feedback = call_gemini(
-        FEEDBACK_PROMPT.format(question=question, answer=answer),
+        FEEDBACK_PROMPT.format(question=q.question, answer=answer),
         temperature=0.4,
         thinking_budget=FEEDBACK_THINKING_BUDGET,
     )
 
-    # 1) Slack 피드백 (해당 스레드)
     try:
         slack_post_message(channel, f"🤖 *AI 피드백*\n{feedback}", thread_ts=thread_ts)
     except Exception:
         logger.exception("Slack 피드백 전송 실패")
 
-    # 2) README 갱신 (멱등 mutate + 409 재시도)
+    # 문제 파일 갱신
+    q.answer, q.feedback, q.answered, q.ai_auto = answer, feedback, True, False
+    files = {f"{slug}/{qid}.md": storage.render_question_file(q)}
+    # 인덱스 상태 배지
+    idx_text, _ = github_get_file(f"{slug}/{slug}.md")
+    files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+        idx_text or "", slug, q.category, qid, q.title, q.date, storage.status_label(q))
+    # README 토글(창 안일 때만). 토글 본문이 손상돼 패치가 실패해도 문제 파일/인덱스
+    # 커밋은 유지되도록 국소 try로 감싼다(채점 결과 유실 방지).
+    readme, _ = github_get_file("README.md")
+    if readme and storage.has_toggle(readme, qid):
+        try:
+            files["README.md"] = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=False)
+        except ValueError:
+            logger.warning("README 토글 패치 실패(본문 손상 가능), 문제 파일만 갱신: %s", qid)
+
     try:
-        github_commit_with_retry(
-            lambda c: update_answer_block(c, qid, answer, feedback),
-            f"update {qid} answer",
-        )
+        github_commit_files(files, f"update {qid} answer")
     except Exception:
-        logger.exception("README 갱신 실패(불일치 가능): %s", qid)
+        logger.exception("문제 파일 갱신 실패: %s", qid)
 
 
 def is_authorized_user(event):
@@ -604,36 +600,38 @@ def handle_app_mention(event):
         return
 
     if command == "config_show":
-        content, _ = github_get_readme()
-        reply(f"현재 기본 생성 개수: {get_config_default(content)}개")
+        readme, _ = github_get_file("README.md")
+        reply(f"현재 기본 생성 개수: {get_config_default(readme or '')}개")
         return
 
     if command == "config_set":
         if arg is None or arg < 1 or arg > 10:
             reply("기본 생성 개수는 1~10 사이로 입력해주세요. 예: `@봇 config --default=5`")
             return
-        github_commit_with_retry(lambda c: set_config_default(c, arg), f"config default={arg}")
+        readme, _ = github_get_file("README.md")
+        new_readme, _ = set_config_default(readme or storage.EMPTY_README, arg)
+        github_commit_files({"README.md": new_readme}, f"config default={arg}")
         reply(f"기본 생성 개수가 {arg}개로 설정되었습니다.")
         return
 
     if command == "question":
-        content, _ = github_get_readme()
-        n = arg if arg is not None else get_config_default(content)
+        readme, _ = github_get_file("README.md")
+        readme = readme or storage.EMPTY_README
+        n = arg if arg is not None else get_config_default(readme)
         if n < 1 or n > 10:
             reply("질문 개수는 1~10 사이로 입력해주세요. 예: `@봇 질문 3`")
             return
-        questions = generate_questions(content, n)
         today = today_kst_iso()
-        _, assigned_ids = github_commit_with_retry(
-            partial(append_questions, questions, date_str=today), "add questions on demand"
-        )
+        files, ids, questions, new_readme = _generate_and_stage(readme, n, today)
+        files["README.md"] = new_readme
+        github_commit_files(files, "add questions on demand")
         # 질문은 채널 최상위로 전송 (루틴 B의 [Q###] 매핑 보존)
-        for qid, (category, title, question) in zip(assigned_ids, questions):
+        for qid, (category, title, question) in zip(ids, questions):
             try:
                 slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
             except Exception:
                 logger.exception("Slack 질문 전송 실패: %s", qid)
-        reply(f"질문 {len(assigned_ids)}개를 추가했습니다.")
+        reply(f"질문 {len(ids)}개를 추가했습니다.")
         return
 
     reply("모르는 명령입니다. `@봇 help` 를 입력해 사용법을 확인하세요.")
