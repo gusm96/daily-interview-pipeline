@@ -35,3 +35,22 @@ def test_migration_prunes_readme_to_window():
     files = build_migration(OLD, "2026-07-05")
     assert "q Q001" not in files["README.md"]
     assert "CS/Q001.md" in files
+
+
+# 나의 답변이 AI 자동 태그로 시작하는 문제(미응시 자동 모범답안)
+OLD_AI_AUTO = (
+    "## 🖥️ CS (네트워크/OS)\n\n"
+    "- <details><summary><b>[Q003]</b> 캐시 <i>(2026-07-04)</i></summary>\n\n"
+    "  **Q.** 캐시란?\n\n  ### 🧑‍💻 나의 답변\n"
+    f"  {storage.AI_AUTO_TAG}\n  캐시는 임시 저장소입니다.\n\n"
+    "  ### 🤖 AI 피드백\n  (AI 자동 작성 - 검토 필요)\n  </details>\n\n"
+)
+
+
+def test_migration_detects_ai_auto_and_strips_tag():
+    files = build_migration(OLD_AI_AUTO, "2026-07-05")
+    q = storage.parse_question_file(files["CS/Q003.md"])
+    assert q.ai_auto is True
+    assert q.answered is False
+    assert storage.AI_AUTO_TAG not in q.answer
+    assert "캐시는 임시 저장소입니다." in q.answer

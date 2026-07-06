@@ -19,7 +19,7 @@ _BLOCK_RE = re.compile(
     r"### 🤖 AI 피드백\s*(?P<feedback>.*?)\s*</details>",
     re.DOTALL,
 )
-_AI_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
+_AI_TAG = storage.AI_AUTO_TAG
 
 
 def _parse_old(old_readme):
