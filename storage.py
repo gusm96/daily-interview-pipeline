@@ -180,7 +180,7 @@ def build_readme_toggle(q):
     fb_block = "\n".join(f"  {ln}" for ln in feedback.splitlines()) if feedback else "  "
     return (
         f"- <!-- q {q.id} {q.slug} {q.date} --><details>"
-        f"<summary><b>[{q.id}]</b> {q.category} | {q.title} <i>({q.date})</i></summary>\n"
+        f"<summary><b>[{q.id}]</b> {q.title} <i>({q.date})</i></summary>\n"
         f"  \n"
         f"  **Q.** {q.question}\n"
         f"  \n"
@@ -298,7 +298,7 @@ def scan_window_unanswered(readme):
         answer_seg = body.group(2)
         if answer_seg.strip() != "" or AI_AUTO_TAG in answer_seg:
             continue
-        title_m = re.search(r"</b>\s*.*?\|\s*(.*?)\s*<i>", toggle)
+        title_m = re.search(r"</b>\s*(.*?)\s*<i>", toggle)
         q_m = re.search(r"\*\*Q\.\*\*\s*(.*?)\s*\n", toggle)
         out.append((qid, slug, date,
                     title_m.group(1) if title_m else "",
