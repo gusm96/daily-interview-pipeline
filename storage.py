@@ -193,11 +193,20 @@ def build_readme_toggle(q):
     )
 
 
+_TOGGLE_MARKER_RE = re.compile(r"<!-- q (Q\d{3,}) (\w+) ([\d-]+) -->")
+
+
 def insert_toggle(readme, toggle):
-    """questions:start 바로 아래에 토글을 삽입(최신 먼저)."""
-    anchor = _Q_START + "\n"
+    """토글 마커의 slug를 읽어 해당 카테고리 섹션 앵커 바로 아래에 삽입(최신 먼저)."""
+    slug = _TOGGLE_MARKER_RE.search(toggle).group(2)
+    anchor = _cat_start(slug) + "\n"
     idx = readme.index(anchor) + len(anchor)
-    return readme[:idx] + toggle + "\n" + readme[idx:]
+    rest = readme[idx:]
+    if rest.startswith(_EMPTY_CATEGORY_NOTE):
+        rest = rest[len(_EMPTY_CATEGORY_NOTE):]
+        if rest.startswith("\n"):
+            rest = rest[1:]
+    return readme[:idx] + toggle + "\n" + rest
 
 
 AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
