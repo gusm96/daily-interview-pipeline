@@ -18,13 +18,22 @@ def build_readme_files(questions):
     return {"README.md": storage.build_readme_window(questions)}
 
 
+def _qids_from_index(idx_text):
+    """인덱스 텍스트에서 중복 없는 qid 목록(등장 순서 유지).
+
+    인덱스 행 하나에 qid가 "[Q061]"과 "Q061.md" 두 곳에 나타나므로 단순
+    findall은 각 qid를 두 번 잡는다 - dict.fromkeys로 등장 순서를 지키며 중복 제거.
+    """
+    return list(dict.fromkeys(re.findall(r"Q\d{3,}", idx_text or "")))
+
+
 if __name__ == "__main__":
     import main
 
     questions = []
     for slug in storage.SLUGS:
         idx_text, _ = main.github_get_file(f"{slug}/{slug}.md")
-        for qid in re.findall(r"Q\d{3,}", idx_text or ""):
+        for qid in _qids_from_index(idx_text):
             text, _ = main.github_get_file(f"{slug}/{qid}.md")
             if text:
                 questions.append(storage.parse_question_file(text))

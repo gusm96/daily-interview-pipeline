@@ -1,5 +1,5 @@
 import storage
-from scripts.rebuild_readme import build_readme_files
+from scripts.rebuild_readme import build_readme_files, _qids_from_index
 
 
 def _q(**kw):
@@ -23,3 +23,15 @@ def test_build_readme_files_keeps_top_n_per_category():
         assert f"q {qid}" in readme
     for qid in ["Q001", "Q002"]:
         assert f"q {qid}" not in readme
+
+
+def test_qids_from_index_dedupes_bracket_and_filename_matches():
+    # 인덱스 행 하나에 "[Q061]"와 "Q061.md" 두 곳에 qid가 등장 -> 한 번만 잡혀야 함
+    idx = "| [Q061](./Q061.md) | 제목 | 2026-07-08 | ⬜ 미답변 |\n"
+    assert _qids_from_index(idx) == ["Q061"]
+
+
+def test_qids_from_index_preserves_order_multiple_rows():
+    idx = ("| [Q061](./Q061.md) | a | 2026-07-08 | ⬜ 미답변 |\n"
+           "| [Q056](./Q056.md) | b | 2026-07-07 | 🤖 자동답안 |\n")
+    assert _qids_from_index(idx) == ["Q061", "Q056"]
