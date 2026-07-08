@@ -136,8 +136,9 @@ def test_toggle_has_marker_and_summary():
     q = _q(id="Q015")
     tog = storage.build_readme_toggle(q)
     assert tog.startswith("- <!-- q Q015 CS 2026-07-05 -->")
-    assert "<summary><b>[Q015]</b> 🖥️ CS (네트워크/OS) | TCP 흐름제어 " \
-           "<i>(2026-07-05)</i></summary>" in tog
+    # 카테고리 섹션 안에 있으므로 요약에 카테고리를 반복하지 않고 [ID] 제목 (날짜)만 표시
+    assert "<summary><b>[Q015]</b> TCP 흐름제어 <i>(2026-07-05)</i></summary>" in tog
+    assert "🖥️ CS (네트워크/OS)" not in tog
     assert "📄 [전체 보기](./CS/Q015.md)" in tog
     assert tog.rstrip().endswith("</details>")
 
@@ -209,6 +210,7 @@ def test_scan_window_unanswered_lists_empty_only():
     assert ids == ["Q002"]           # Q001은 답변 있음 → 제외
     qid, slug, date, title, question = out[0]
     assert slug == "CS" and date == "2026-07-05"
+    assert title == "TCP 흐름제어"
     assert question == "흐름제어와 혼잡제어의 차이는?"
 
 
