@@ -2,7 +2,7 @@
 import re
 from dataclasses import dataclass
 
-README_WINDOW_DAYS = 7
+README_TOP_N_PER_CATEGORY = 5
 
 # 카테고리 원문(prompts.CATEGORIES) → 경로용 ASCII 슬러그. 유일 소스.
 CATEGORY_SLUGS = {
@@ -146,19 +146,27 @@ def next_question_ids(index_texts, count):
     return [f"Q{n:03d}" for n in range(start, start + count)]
 
 
-_Q_START = "<!-- questions:start -->"
-_Q_END = "<!-- questions:end -->"
+_EMPTY_CATEGORY_NOTE = "(이번 주 등록된 문제 없음)"
+
+
+def _cat_start(slug):
+    return f"<!-- questions:{slug}:start -->"
+
+
+def _cat_end(slug):
+    return f"<!-- questions:{slug}:end -->"
+
 
 EMPTY_README = (
     "<!-- config:default=5 -->\n"
     "# daily-interview-pipeline\n"
     "GCP Cloud Functions & Gemini API를 이용해 매일 아침 자동으로 빌드되는 "
     "백엔드 기술 면접 독학 저장소\n\n"
-    "📚 카테고리별 전체 문제: "
-    "[CS](./CS/CS.md) · [Java](./Java/Java.md) · [SpringBoot](./SpringBoot/SpringBoot.md) · "
-    "[Database](./Database/Database.md) · [Etc](./Etc/Etc.md)\n\n"
-    "## 최근 7일 문제\n\n"
-    f"{_Q_START}\n{_Q_END}\n"
+) + "\n".join(
+    f"## {category_for_slug(slug)}\n\n"
+    f"{_cat_start(slug)}\n{_EMPTY_CATEGORY_NOTE}\n{_cat_end(slug)}\n"
+    f"📄 [{slug} 모든 문제 보기](./{slug}/{slug}.md)\n"
+    for slug in SLUGS
 )
 
 

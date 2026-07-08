@@ -27,8 +27,21 @@ def test_status_label_priority():
     assert storage.status_label(q) == "✅ 답변완료"
 
 
-def test_window_days_is_seven():
-    assert storage.README_WINDOW_DAYS == 7
+def test_top_n_per_category_is_five():
+    assert storage.README_TOP_N_PER_CATEGORY == 5
+
+
+def test_empty_readme_has_category_sections_and_links():
+    r = storage.EMPTY_README
+    assert "최근 7일 문제" not in r
+    assert "카테고리별 전체 문제" not in r  # 상단 요약 링크 삭제됨
+    for slug in storage.SLUGS:
+        category = storage.category_for_slug(slug)
+        assert f"## {category}" in r
+        assert f"<!-- questions:{slug}:start -->" in r
+        assert f"<!-- questions:{slug}:end -->" in r
+        assert f"📄 [{slug} 모든 문제 보기](./{slug}/{slug}.md)" in r
+    assert r.count("(이번 주 등록된 문제 없음)") == len(storage.SLUGS)
 
 
 def _q(**kw):
