@@ -209,6 +209,19 @@ def insert_toggle(readme, toggle):
     return readme[:idx] + toggle + "\n" + rest
 
 
+def build_readme_window(questions, limit=README_TOP_N_PER_CATEGORY):
+    """전체 Question 목록 → 카테고리별 상위 limit개만 반영한 새 README(EMPTY_README 기준 재구성)."""
+    by_slug = {}
+    for q in questions:
+        by_slug.setdefault(q.slug, []).append(q)
+    readme = EMPTY_README
+    for qs in by_slug.values():
+        qs = sorted(qs, key=lambda x: x.id)
+        for q in qs[-limit:]:  # 오래된→최신 삽입 = 최신이 위
+            readme = insert_toggle(readme, build_readme_toggle(q))
+    return readme
+
+
 AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
 _MARKER_RE = re.compile(r"<!-- q (Q\d{3,}) (\w+) ([\d-]+) -->")
 

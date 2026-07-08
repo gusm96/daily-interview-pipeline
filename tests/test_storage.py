@@ -255,3 +255,19 @@ def test_marker_info_and_has_toggle():
     assert storage.marker_info(r, "Q999") is None
     assert storage.has_toggle(r, "Q007") is True
     assert storage.has_toggle(r, "Q999") is False
+
+
+def test_build_readme_window_keeps_top_n_per_category():
+    qs = [_q(id=f"Q{i:03d}", date=f"2026-07-{i:02d}") for i in range(1, 8)]  # CS 7개
+    r = storage.build_readme_window(qs, limit=5)
+    for qid in ["Q003", "Q004", "Q005", "Q006", "Q007"]:
+        assert f"q {qid}" in r
+    for qid in ["Q001", "Q002"]:
+        assert f"q {qid}" not in r
+
+
+def test_build_readme_window_separates_by_category():
+    qs = [_q(id="Q001"),
+          _q(id="Q002", slug="Java", category=storage.category_for_slug("Java"))]
+    r = storage.build_readme_window(qs)
+    assert "q Q001" in r and "q Q002" in r
