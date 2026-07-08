@@ -5,7 +5,6 @@ build_migration()은 순수 함수(파일 dict 생성). __main__ 실행부는 �
 import os
 import re
 import sys
-from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import storage  # noqa: E402
@@ -58,8 +57,8 @@ def _parse_old(old_readme):
     return questions
 
 
-def build_migration(old_readme, today_iso):
-    """구 README → {path: content}. 문제 파일 + 카테고리 인덱스 + 창 적용 README."""
+def build_migration(old_readme):
+    """구 README → {path: content}. 문제 파일 + 카테고리 인덱스 + 카테고리별 상위 N개 적용 README."""
     questions = _parse_old(old_readme)
     files = {}
     indexes = {}  # slug -> index_text
@@ -71,20 +70,14 @@ def build_migration(old_readme, today_iso):
     for slug, text in indexes.items():
         files[f"{slug}/{slug}.md"] = text
 
-    readme = storage.EMPTY_README
-    cutoff = (datetime.fromisoformat(today_iso)
-              - timedelta(days=storage.README_WINDOW_DAYS - 1)).date().isoformat()
-    for q in sorted(questions, key=lambda x: (x.date, x.id)):  # 오래된→최신 삽입 = 최신 먼저
-        if q.date >= cutoff:
-            readme = storage.insert_toggle(readme, storage.build_readme_toggle(q))
-    files["README.md"] = readme
+    files["README.md"] = storage.build_readme_window(questions)
     return files
 
 
 if __name__ == "__main__":
     import main
     old, _ = main.github_get_file("README.md")
-    files = build_migration(old or "", main.today_kst_iso())
+    files = build_migration(old or "")
     print(f"마이그레이션 대상 파일 {len(files)}개")
     for path in sorted(files):
         print(" -", path)

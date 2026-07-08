@@ -2,7 +2,7 @@
 import re
 from dataclasses import dataclass
 
-README_WINDOW_DAYS = 7
+README_TOP_N_PER_CATEGORY = 5
 
 # 카테고리 원문(prompts.CATEGORIES) → 경로용 ASCII 슬러그. 유일 소스.
 CATEGORY_SLUGS = {
@@ -146,19 +146,27 @@ def next_question_ids(index_texts, count):
     return [f"Q{n:03d}" for n in range(start, start + count)]
 
 
-_Q_START = "<!-- questions:start -->"
-_Q_END = "<!-- questions:end -->"
+_EMPTY_CATEGORY_NOTE = "(이번 주 등록된 문제 없음)"
+
+
+def _cat_start(slug):
+    return f"<!-- questions:{slug}:start -->"
+
+
+def _cat_end(slug):
+    return f"<!-- questions:{slug}:end -->"
+
 
 EMPTY_README = (
     "<!-- config:default=5 -->\n"
     "# daily-interview-pipeline\n"
     "GCP Cloud Functions & Gemini API를 이용해 매일 아침 자동으로 빌드되는 "
     "백엔드 기술 면접 독학 저장소\n\n"
-    "📚 카테고리별 전체 문제: "
-    "[CS](./CS/CS.md) · [Java](./Java/Java.md) · [SpringBoot](./SpringBoot/SpringBoot.md) · "
-    "[Database](./Database/Database.md) · [Etc](./Etc/Etc.md)\n\n"
-    "## 최근 7일 문제\n\n"
-    f"{_Q_START}\n{_Q_END}\n"
+) + "\n".join(
+    f"## {category_for_slug(slug)}\n\n"
+    f"{_cat_start(slug)}\n{_EMPTY_CATEGORY_NOTE}\n{_cat_end(slug)}\n"
+    f"📄 [{slug} 모든 문제 보기](./{slug}/{slug}.md)\n"
+    for slug in SLUGS
 )
 
 
@@ -185,11 +193,33 @@ def build_readme_toggle(q):
     )
 
 
+_TOGGLE_MARKER_RE = re.compile(r"<!-- q (Q\d{3,}) (\w+) ([\d-]+) -->")
+
+
 def insert_toggle(readme, toggle):
-    """questions:start 바로 아래에 토글을 삽입(최신 먼저)."""
-    anchor = _Q_START + "\n"
+    """토글 마커의 slug를 읽어 해당 카테고리 섹션 앵커 바로 아래에 삽입(최신 먼저)."""
+    slug = _TOGGLE_MARKER_RE.search(toggle).group(2)
+    anchor = _cat_start(slug) + "\n"
     idx = readme.index(anchor) + len(anchor)
-    return readme[:idx] + toggle + "\n" + readme[idx:]
+    rest = readme[idx:]
+    if rest.startswith(_EMPTY_CATEGORY_NOTE):
+        rest = rest[len(_EMPTY_CATEGORY_NOTE):]
+        if rest.startswith("\n"):
+            rest = rest[1:]
+    return readme[:idx] + toggle + "\n" + rest
+
+
+def build_readme_window(questions, limit=README_TOP_N_PER_CATEGORY):
+    """전체 Question 목록 → 카테고리별 상위 limit개만 반영한 새 README(EMPTY_README 기준 재구성)."""
+    by_slug = {}
+    for q in questions:
+        by_slug.setdefault(q.slug, []).append(q)
+    readme = EMPTY_README
+    for qs in by_slug.values():
+        qs = sorted(qs, key=lambda x: x.id)
+        for q in qs[-limit:]:  # 오래된→최신 삽입 = 최신이 위
+            readme = insert_toggle(readme, build_readme_toggle(q))
+    return readme
 
 
 AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
@@ -241,11 +271,20 @@ def _iter_toggles(readme):
     return out
 
 
-def prune_expired(readme, cutoff_iso):
-    """마커 date < cutoff_iso인 토글을 README에서 제거."""
-    for qid, slug, date, toggle in _iter_toggles(readme):
-        if date < cutoff_iso:
+def prune_overflow(readme, limit=README_TOP_N_PER_CATEGORY):
+    """카테고리별로 최신 limit개만 남기고 초과분 토글을 제거. 섹션이 비면 플레이스홀더 복구."""
+    for slug in SLUGS:
+        toggles = [t for qid, s, date, t in _iter_toggles(readme) if s == slug]
+        for toggle in toggles[limit:]:
             readme = readme.replace(toggle + "\n", "").replace(toggle, "")
+        start, end = _cat_start(slug), _cat_end(slug)
+        try:
+            s_idx = readme.index(start) + len(start)
+            e_idx = readme.index(end, s_idx)
+        except ValueError:
+            continue
+        if readme[s_idx:e_idx].strip() == "":
+            readme = readme[:s_idx] + f"\n{_EMPTY_CATEGORY_NOTE}\n" + readme[e_idx:]
     return readme
 
 

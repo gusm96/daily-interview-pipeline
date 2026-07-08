@@ -442,9 +442,8 @@ def run_generate_routine():
     count = max(1, min(10, get_config_default(readme)))
     files, ids, questions, readme = _generate_and_stage(readme, count, today, files)
 
-    # 3) 창 벗어난 토글 prune
-    cutoff = (datetime.fromisoformat(today) - timedelta(days=storage.README_WINDOW_DAYS - 1)).date().isoformat()
-    readme = storage.prune_expired(readme, cutoff)
+    # 3) 카테고리별 상위 N개 초과분 prune
+    readme = storage.prune_overflow(readme)
     files["README.md"] = readme
 
     # 4) 1커밋

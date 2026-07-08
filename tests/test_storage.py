@@ -27,8 +27,21 @@ def test_status_label_priority():
     assert storage.status_label(q) == "✅ 답변완료"
 
 
-def test_window_days_is_seven():
-    assert storage.README_WINDOW_DAYS == 7
+def test_top_n_per_category_is_five():
+    assert storage.README_TOP_N_PER_CATEGORY == 5
+
+
+def test_empty_readme_has_category_sections_and_links():
+    r = storage.EMPTY_README
+    assert "최근 7일 문제" not in r
+    assert "카테고리별 전체 문제" not in r  # 상단 요약 링크 삭제됨
+    for slug in storage.SLUGS:
+        category = storage.category_for_slug(slug)
+        assert f"## {category}" in r
+        assert f"<!-- questions:{slug}:start -->" in r
+        assert f"<!-- questions:{slug}:end -->" in r
+        assert f"📄 [{slug} 모든 문제 보기](./{slug}/{slug}.md)" in r
+    assert r.count("(이번 주 등록된 문제 없음)") == len(storage.SLUGS)
 
 
 def _q(**kw):
@@ -141,7 +154,28 @@ def test_insert_toggle_places_newest_first():
     r = storage.insert_toggle(r, storage.build_readme_toggle(_q(id="Q002")))
     # 최신(Q002)이 start 마커 바로 아래 = Q001보다 위
     assert r.index("q Q002") < r.index("q Q001")
-    assert "<!-- questions:start -->" in r and "<!-- questions:end -->" in r
+    assert "<!-- questions:CS:start -->" in r and "<!-- questions:CS:end -->" in r
+
+
+def test_insert_toggle_replaces_empty_placeholder_in_own_category_only():
+    r = storage.EMPTY_README
+    r2 = storage.insert_toggle(r, storage.build_readme_toggle(_q(id="Q001")))  # slug=CS
+    cs_start = r2.index("<!-- questions:CS:start -->")
+    cs_end = r2.index("<!-- questions:CS:end -->")
+    assert "이번 주 등록된 문제 없음" not in r2[cs_start:cs_end]
+    # 다른(Java 등) 카테고리 섹션엔 플레이스홀더가 그대로 남아있음
+    java_start = r2.index("<!-- questions:Java:start -->")
+    java_end = r2.index("<!-- questions:Java:end -->")
+    assert "이번 주 등록된 문제 없음" in r2[java_start:java_end]
+
+
+def test_insert_toggle_inserts_into_matching_category_from_marker():
+    r = storage.EMPTY_README
+    java_q = _q(id="Q009", slug="Java", category=storage.category_for_slug("Java"))
+    r2 = storage.insert_toggle(r, storage.build_readme_toggle(java_q))
+    java_start = r2.index("<!-- questions:Java:start -->")
+    java_end = r2.index("<!-- questions:Java:end -->")
+    assert "q Q009" in r2[java_start:java_end]
 
 
 def _readme_with(*questions):
@@ -184,11 +218,35 @@ def test_scan_window_excludes_ai_auto():
     assert storage.scan_window_unanswered(r) == []
 
 
-def test_prune_expired_removes_old_toggles():
-    r = _readme_with(_q(id="Q001", date="2026-06-01"), _q(id="Q009", date="2026-07-05"))
-    r2 = storage.prune_expired(r, "2026-06-29")   # cutoff 이전 = 만료
+def test_prune_overflow_keeps_top_n_per_category():
+    r = storage.EMPTY_README
+    for i in range(1, 8):  # Q001~Q007, 카테고리당 상한(5) 초과
+        q = _q(id=f"Q{i:03d}", date=f"2026-07-{i:02d}")
+        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
+    r2 = storage.prune_overflow(r, limit=5)
+    for qid in ["Q003", "Q004", "Q005", "Q006", "Q007"]:
+        assert f"q {qid}" in r2
+    for qid in ["Q001", "Q002"]:
+        assert f"q {qid}" not in r2
+
+
+def test_prune_overflow_restores_placeholder_when_category_empty():
+    r = storage.insert_toggle(storage.EMPTY_README, storage.build_readme_toggle(_q(id="Q001")))
+    r2 = storage.prune_overflow(r, limit=0)
+    cs_start = r2.index("<!-- questions:CS:start -->")
+    cs_end = r2.index("<!-- questions:CS:end -->")
+    assert "이번 주 등록된 문제 없음" in r2[cs_start:cs_end]
     assert "q Q001" not in r2
-    assert "q Q009" in r2
+
+
+def test_prune_overflow_other_categories_untouched():
+    r = storage.EMPTY_README
+    java_q = _q(id="Q100", slug="Java", category=storage.category_for_slug("Java"))
+    r = storage.insert_toggle(r, storage.build_readme_toggle(java_q))
+    for i in range(1, 8):  # CS 7개(초과)
+        r = storage.insert_toggle(r, storage.build_readme_toggle(_q(id=f"Q{i:03d}")))
+    r2 = storage.prune_overflow(r, limit=5)
+    assert "q Q100" in r2  # Java는 1개뿐이라 안 잘림
 
 
 def test_marker_info_and_has_toggle():
@@ -197,3 +255,19 @@ def test_marker_info_and_has_toggle():
     assert storage.marker_info(r, "Q999") is None
     assert storage.has_toggle(r, "Q007") is True
     assert storage.has_toggle(r, "Q999") is False
+
+
+def test_build_readme_window_keeps_top_n_per_category():
+    qs = [_q(id=f"Q{i:03d}", date=f"2026-07-{i:02d}") for i in range(1, 8)]  # CS 7개
+    r = storage.build_readme_window(qs, limit=5)
+    for qid in ["Q003", "Q004", "Q005", "Q006", "Q007"]:
+        assert f"q {qid}" in r
+    for qid in ["Q001", "Q002"]:
+        assert f"q {qid}" not in r
+
+
+def test_build_readme_window_separates_by_category():
+    qs = [_q(id="Q001"),
+          _q(id="Q002", slug="Java", category=storage.category_for_slug("Java"))]
+    r = storage.build_readme_window(qs)
+    assert "q Q001" in r and "q Q002" in r
