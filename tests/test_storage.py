@@ -218,11 +218,35 @@ def test_scan_window_excludes_ai_auto():
     assert storage.scan_window_unanswered(r) == []
 
 
-def test_prune_expired_removes_old_toggles():
-    r = _readme_with(_q(id="Q001", date="2026-06-01"), _q(id="Q009", date="2026-07-05"))
-    r2 = storage.prune_expired(r, "2026-06-29")   # cutoff 이전 = 만료
+def test_prune_overflow_keeps_top_n_per_category():
+    r = storage.EMPTY_README
+    for i in range(1, 8):  # Q001~Q007, 카테고리당 상한(5) 초과
+        q = _q(id=f"Q{i:03d}", date=f"2026-07-{i:02d}")
+        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
+    r2 = storage.prune_overflow(r, limit=5)
+    for qid in ["Q003", "Q004", "Q005", "Q006", "Q007"]:
+        assert f"q {qid}" in r2
+    for qid in ["Q001", "Q002"]:
+        assert f"q {qid}" not in r2
+
+
+def test_prune_overflow_restores_placeholder_when_category_empty():
+    r = storage.insert_toggle(storage.EMPTY_README, storage.build_readme_toggle(_q(id="Q001")))
+    r2 = storage.prune_overflow(r, limit=0)
+    cs_start = r2.index("<!-- questions:CS:start -->")
+    cs_end = r2.index("<!-- questions:CS:end -->")
+    assert "이번 주 등록된 문제 없음" in r2[cs_start:cs_end]
     assert "q Q001" not in r2
-    assert "q Q009" in r2
+
+
+def test_prune_overflow_other_categories_untouched():
+    r = storage.EMPTY_README
+    java_q = _q(id="Q100", slug="Java", category=storage.category_for_slug("Java"))
+    r = storage.insert_toggle(r, storage.build_readme_toggle(java_q))
+    for i in range(1, 8):  # CS 7개(초과)
+        r = storage.insert_toggle(r, storage.build_readme_toggle(_q(id=f"Q{i:03d}")))
+    r2 = storage.prune_overflow(r, limit=5)
+    assert "q Q100" in r2  # Java는 1개뿐이라 안 잘림
 
 
 def test_marker_info_and_has_toggle():

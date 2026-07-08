@@ -258,11 +258,20 @@ def _iter_toggles(readme):
     return out
 
 
-def prune_expired(readme, cutoff_iso):
-    """마커 date < cutoff_iso인 토글을 README에서 제거."""
-    for qid, slug, date, toggle in _iter_toggles(readme):
-        if date < cutoff_iso:
+def prune_overflow(readme, limit=README_TOP_N_PER_CATEGORY):
+    """카테고리별로 최신 limit개만 남기고 초과분 토글을 제거. 섹션이 비면 플레이스홀더 복구."""
+    for slug in SLUGS:
+        toggles = [t for qid, s, date, t in _iter_toggles(readme) if s == slug]
+        for toggle in toggles[limit:]:
             readme = readme.replace(toggle + "\n", "").replace(toggle, "")
+        start, end = _cat_start(slug), _cat_end(slug)
+        try:
+            s_idx = readme.index(start) + len(start)
+            e_idx = readme.index(end, s_idx)
+        except ValueError:
+            continue
+        if readme[s_idx:e_idx].strip() == "":
+            readme = readme[:s_idx] + f"\n{_EMPTY_CATEGORY_NOTE}\n" + readme[e_idx:]
     return readme
 
 
