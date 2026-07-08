@@ -14,7 +14,7 @@ OLD = (
 
 
 def test_migration_creates_question_files():
-    files = build_migration(OLD, "2026-07-05")
+    files = build_migration(OLD)
     assert "CS/Q001.md" in files and "CS/Q002.md" in files
     q1 = storage.parse_question_file(files["CS/Q001.md"])
     assert q1.answer == "연결지향 여부." and q1.answered is True
@@ -23,18 +23,32 @@ def test_migration_creates_question_files():
 
 
 def test_migration_creates_index_and_readme():
-    files = build_migration(OLD, "2026-07-05")
+    files = build_migration(OLD)
     assert "CS/CS.md" in files
     assert "총 2개" in files["CS/CS.md"]
     assert "README.md" in files
-    assert "<!-- questions:start -->" in files["README.md"]
+    assert "<!-- questions:CS:start -->" in files["README.md"]
 
 
-def test_migration_prunes_readme_to_window():
-    # 2026-06-17 문제는 2026-07-05 기준 7일 창 밖 → README에는 없음(파일엔 존재)
-    files = build_migration(OLD, "2026-07-05")
-    assert "q Q001" not in files["README.md"]
-    assert "CS/Q001.md" in files
+def _old_block(qid, date, title="제목"):
+    return (
+        f"- <details><summary><b>[{qid}]</b> {title} <i>({date})</i></summary>\n\n"
+        f"  **Q.** 질문?\n\n  ### 🧑‍💻 나의 답변\n  답변\n\n"
+        f"  ### 🤖 AI 피드백\n  피드백\n  </details>\n\n"
+    )
+
+
+def test_migration_keeps_only_top_n_per_category_in_readme():
+    old = "## 🖥️ CS (네트워크/OS)\n\n" + "".join(
+        _old_block(f"Q{i:03d}", f"2026-06-{i:02d}") for i in range(1, 8)  # Q001~Q007, 7개
+    )
+    files = build_migration(old)
+    readme = files["README.md"]
+    for qid in ["Q003", "Q004", "Q005", "Q006", "Q007"]:
+        assert f"q {qid}" in readme
+    for qid in ["Q001", "Q002"]:
+        assert f"q {qid}" not in readme
+        assert f"CS/{qid}.md" in files  # 문제 파일엔 영구 보존
 
 
 # 나의 답변이 AI 자동 태그로 시작하는 문제(미응시 자동 모범답안)
@@ -48,7 +62,7 @@ OLD_AI_AUTO = (
 
 
 def test_migration_detects_ai_auto_and_strips_tag():
-    files = build_migration(OLD_AI_AUTO, "2026-07-05")
+    files = build_migration(OLD_AI_AUTO)
     q = storage.parse_question_file(files["CS/Q003.md"])
     assert q.ai_auto is True
     assert q.answered is False
@@ -67,7 +81,7 @@ OLD_INDENTED = (
 
 
 def test_migration_dedents_indented_answer_and_feedback():
-    files = build_migration(OLD_INDENTED, "2026-07-05")
+    files = build_migration(OLD_INDENTED)
     q = storage.parse_question_file(files["CS/Q004.md"])
     assert q.answer == "## 핵심 정의\n\n스레드 풀은 재사용 가능한 스레드 집합입니다."
     assert q.feedback == "총평입니다.\n\n세부 피드백입니다."
