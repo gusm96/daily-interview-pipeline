@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 14개)
+# 🌱 Spring Boot — 전체 문제 (총 15개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q068](./Q068.md) | Spring Security OAuth 2.0 구현 전략 | 2026-07-09 | ⬜ 미답변 |
+| [Q073](./Q073.md) | Spring Transactional 전파 레벨과 동작 | 2026-07-10 | ⬜ 미답변 |
+| [Q068](./Q068.md) | Spring Security OAuth 2.0 구현 전략 | 2026-07-09 | 🤖 자동답안 |
 | [Q063](./Q063.md) | Spring WebFlux 반응형 프로그래밍 모델 | 2026-07-08 | 🤖 자동답안 |
 | [Q058](./Q058.md) | Spring AOP 동작 원리와 활용 | 2026-07-07 | 🤖 자동답안 |
 | [Q053](./Q053.md) | Spring Data JPA Auditing 활용 | 2026-07-06 | 🤖 자동답안 |
