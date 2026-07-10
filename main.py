@@ -377,18 +377,33 @@ _QUESTION_SCHEMA = {
 }
 
 
-def generate_questions(readme, count=5):
-    """기존 README를 컨텍스트로 중복 없는 면접 질문 count개 생성.
+def generate_questions(existing, count=5):
+    """기존 질문 전체 제목 목록(existing)을 컨텍스트로 중복 없는 면접 질문 count개 생성.
     [(category, title, question), ...] 반환. temperature=0.1 (정확도).
     category는 responseSchema enum으로 CATEGORIES 값만 나오도록 강제한다."""
     prompt = QUESTION_GENERATION_PROMPT.format(
         count=count,
         categories=", ".join(CATEGORIES),
-        readme=readme
+        existing=existing
     )
     raw = call_gemini(prompt, temperature=0.1, response_schema=_QUESTION_SCHEMA)
     items = json.loads(raw)
     return [(it["category"], it["title"], it["question"]) for it in items]
+
+
+def drop_duplicate_titles(candidates, existing_titles):
+    """정규화 제목이 기존 제목 또는 같은 배치의 앞선 후보와 일치하는 후보를 제거.
+    개념 중복은 복습 효과로 수용하고, 글자 단위 복제(Q046~Q055류)만 코드에서 확정 차단한다."""
+    seen = {storage.normalize_title(t) for t in existing_titles}
+    kept = []
+    for category, title, question in candidates:
+        key = storage.normalize_title(title)
+        if key in seen:
+            logger.warning("기존 제목과 중복인 후보 제외: %s", title)
+            continue
+        seen.add(key)
+        kept.append((category, title, question))
+    return kept
 
 
 _MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차 Gemini 누적→타임아웃 방지)
@@ -397,11 +412,13 @@ _MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차
 def _generate_and_stage(readme, count, today, files=None):
     """신규 질문 count개를 생성해 (files, ids, questions, new_readme) 반환. 채점/모범답안 없음.
     files를 넘기면(예: 루틴 A의 미답변 채움 단계에서 이미 쌓인 파일들) 이어서 누적한다."""
-    questions = generate_questions(readme, count)
     if files is None:
         files = {}
-    index_texts = [_index_text(files, s) for s in storage.SLUGS]
-    ids = storage.next_question_ids(index_texts, len(questions))
+    index_map = {s: _index_text(files, s) for s in storage.SLUGS}
+    # 중복 방지 컨텍스트는 README 윈도우(상위 5개)가 아니라 인덱스 전체 이력을 사용한다.
+    questions = generate_questions(storage.existing_titles_block(index_map), count)
+    questions = drop_duplicate_titles(questions, storage.existing_titles(index_map))
+    ids = storage.next_question_ids(list(index_map.values()), len(questions))
     for qid, (category, title, question) in zip(ids, questions):
         slug = storage.slug_for(category)
         q = storage.Question(qid, slug, category, title, today, question)

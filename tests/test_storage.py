@@ -120,6 +120,40 @@ def test_upsert_index_updates_existing_status_no_dup():
     assert "⬜ 미답변" not in t
 
 
+def test_existing_titles_block_lists_all_titles_across_categories():
+    java = storage.upsert_index_row("", "Java", storage.category_for_slug("Java"),
+                                    "Q037", "옛날 Java 제목", "2026-07-03", "🤖 자동답안")
+    java = storage.upsert_index_row(java, "Java", storage.category_for_slug("Java"),
+                                    "Q062", "최신 Java 제목", "2026-07-08", "⬜ 미답변")
+    cs = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
+                                  "Q001", "CS 제목", "2026-07-01", "🤖 자동답안")
+    block = storage.existing_titles_block({"Java": java, "CS": cs})
+    # 오래돼서 README 윈도우 밖으로 밀려난 제목도 반드시 포함
+    assert "옛날 Java 제목" in block
+    assert "최신 Java 제목" in block
+    assert "CS 제목" in block
+
+
+def test_normalize_title_ignores_case_space_punctuation():
+    a = storage.normalize_title("Java GC 동작 원리와 튜닝!")
+    b = storage.normalize_title("java gc 동작원리와, 튜닝")
+    assert a == b
+
+
+def test_normalize_title_distinguishes_different_titles():
+    assert storage.normalize_title("Java GC 동작 원리") != storage.normalize_title("Java Stream API")
+
+
+def test_existing_titles_returns_flat_list_across_categories():
+    java = storage.upsert_index_row("", "Java", storage.category_for_slug("Java"),
+                                    "Q037", "옛날 Java 제목", "2026-07-03", "🤖 자동답안")
+    cs = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
+                                  "Q001", "CS 제목", "2026-07-01", "🤖 자동답안")
+    titles = storage.existing_titles({"Java": java, "CS": cs})
+    assert "옛날 Java 제목" in titles
+    assert "CS 제목" in titles
+
+
 def test_next_question_ids_scans_multiple_indexes():
     idx1 = storage.upsert_index_row("", "CS", storage.category_for_slug("CS"),
                                     "Q005", "A", "d", "⬜ 미답변")
