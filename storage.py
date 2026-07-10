@@ -139,6 +139,37 @@ def upsert_index_row(index_text, slug, category, qid, title, date, status):
     return _render_index(slug, category, rows)
 
 
+def existing_titles_block(index_texts_by_slug):
+    """{slug: index_text} → 카테고리별 전체 제목 목록 텍스트(중복 방지 컨텍스트용). I/O 없음.
+
+    README 윈도우(상위 N개)와 달리 인덱스는 전체 이력을 담으므로, 오래돼서 윈도우 밖으로
+    밀려난 질문까지 Gemini가 중복 판단에 참고할 수 있다."""
+    lines = []
+    for slug in SLUGS:
+        category = category_for_slug(slug)
+        rows = _index_rows(index_texts_by_slug.get(slug, ""))
+        lines.append(f"## {category}")
+        if rows:
+            lines.extend(f"- {title}" for _qid, title, _date, _status in rows)
+        else:
+            lines.append("- (없음)")
+    return "\n".join(lines)
+
+
+_TITLE_NORM_RE = re.compile(r"[^0-9a-z가-힣]+")
+
+
+def normalize_title(title):
+    """소문자화 후 영숫자·한글 이외 문자를 제거한 비교 키. 완전 복제 검출 전용."""
+    return _TITLE_NORM_RE.sub("", (title or "").lower())
+
+
+def existing_titles(index_texts_by_slug):
+    """{slug: index_text} → 전체 카테고리의 제목 평면 목록(중복 검사용)."""
+    return [title for slug in SLUGS
+            for _qid, title, _date, _status in _index_rows(index_texts_by_slug.get(slug, ""))]
+
+
 def next_question_ids(index_texts, count):
     """여러 인덱스 텍스트에서 최대 Q### + 1부터 count개 ID 반환."""
     nums = [int(n) for t in index_texts for n in _QID_ANY_RE.findall(t or "")]

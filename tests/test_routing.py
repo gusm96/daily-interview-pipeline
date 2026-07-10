@@ -82,6 +82,96 @@ def test_run_generate_routine_flow(monkeypatch):
     assert len(posted) == 2 and any("Q003" in t for t in posted)
 
 
+def test_run_generate_feeds_full_history_not_just_window(monkeypatch):
+    """루틴 A는 README 윈도우(상위 5개) 밖의 과거 제목까지 중복방지 컨텍스트로 넘겨야 한다."""
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(main, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
+
+    captured = {}
+
+    def fake_generate(context, count=5):
+        captured["context"] = context
+        return [("☕ Java", "새 제목", "새 질문")]
+
+    monkeypatch.setattr(main, "generate_questions", fake_generate)
+    # 인덱스에는 과거 제목이 있지만 README에는 없음(윈도우 밖)
+    java_index = storage.upsert_index_row(
+        "", "Java", storage.category_for_slug("Java"),
+        "Q037", "윈도우밖 과거제목", "2026-07-03", "🤖 자동답안")
+
+    def fake_get(path):
+        if path == "README.md":
+            return storage.EMPTY_README, "s"
+        if path == "Java/Java.md":
+            return java_index, "s"
+        return "", None
+
+    monkeypatch.setattr(main, "github_get_file", fake_get)
+    monkeypatch.setattr(main, "github_commit_files", lambda files, message, **kw: None)
+    monkeypatch.setattr(main, "today_kst_iso", lambda: "2026-07-09")
+
+    main.run_generate_routine()
+
+    assert "윈도우밖 과거제목" in captured["context"]
+
+
+def test_drop_duplicate_titles_rejects_normalized_match_with_existing():
+    candidates = [("☕ Java", "JAVA GC 동작 원리와 튜닝!", "q1"),
+                  ("🗄️ Database", "인덱스 자료구조", "q2")]
+    kept = main.drop_duplicate_titles(candidates, ["Java GC 동작원리와 튜닝"])
+    assert kept == [("🗄️ Database", "인덱스 자료구조", "q2")]
+
+
+def test_drop_duplicate_titles_rejects_within_batch_duplicate():
+    candidates = [("☕ Java", "Stream API 지연 평가", "q1"),
+                  ("☕ Java", "stream api 지연평가", "q2"),
+                  ("🗄️ Database", "인덱스 자료구조", "q3")]
+    kept = main.drop_duplicate_titles(candidates, [])
+    assert kept == [("☕ Java", "Stream API 지연 평가", "q1"),
+                    ("🗄️ Database", "인덱스 자료구조", "q3")]
+
+
+def test_run_generate_skips_candidates_duplicating_index_titles(monkeypatch):
+    """생성 후보가 인덱스의 기존 제목과 (정규화 기준) 같으면 출제·전송에서 제외한다."""
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    posted = []
+    monkeypatch.setattr(main, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(main, "call_gemini", lambda p, temperature: "AI답안")
+    monkeypatch.setattr(main, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "옛날 java 제목", "재탕 질문"),
+                                            ("🗄️ Database", "새 제목", "새 질문")])
+    java_index = storage.upsert_index_row(
+        "", "Java", storage.category_for_slug("Java"),
+        "Q037", "옛날 Java 제목", "2026-07-03", "🤖 자동답안")
+
+    def fake_get(path):
+        if path == "README.md":
+            return storage.EMPTY_README, "s"
+        if path == "Java/Java.md":
+            return java_index, "s"
+        return "", None
+
+    monkeypatch.setattr(main, "github_get_file", fake_get)
+    committed = {}
+    monkeypatch.setattr(main, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files))
+    monkeypatch.setattr(main, "today_kst_iso", lambda: "2026-07-11")
+
+    main.run_generate_routine()
+
+    files = committed["files"]
+    # 중복 후보는 제외되고 새 제목만 다음 ID(Q038)로 출제됨
+    assert "Database/Q038.md" in files
+    assert not any(p.startswith("Java/Q0") and p != "Java/Java.md" for p in files)
+    assert len(posted) == 1 and "새 제목" in posted[0]
+
+
 def test_run_generate_uses_and_clamps_config_default(monkeypatch):
     import storage
     for k in REQUIRED:
