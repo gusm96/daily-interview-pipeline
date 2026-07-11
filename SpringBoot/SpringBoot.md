@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 14개)
+# 🌱 Spring Boot — 전체 문제 (총 15개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q078](./Q078.md) | Spring Data JPA 지연 로딩과 즉시 로딩 | 2026-07-11 | ⬜ 미답변 |
+| [Q083](./Q083.md) | Spring Boot Actuator 활용과 모니터링 | 2026-07-12 | ⬜ 미답변 |
+| [Q078](./Q078.md) | Spring Data JPA 지연 로딩과 즉시 로딩 | 2026-07-11 | 🤖 자동답안 |
 | [Q073](./Q073.md) | Spring Transactional 전파 레벨과 동작 | 2026-07-10 | 🤖 자동답안 |
 | [Q068](./Q068.md) | Spring Security OAuth 2.0 구현 전략 | 2026-07-09 | 🤖 자동답안 |
 | [Q063](./Q063.md) | Spring WebFlux 반응형 프로그래밍 모델 | 2026-07-08 | 🤖 자동답안 |
