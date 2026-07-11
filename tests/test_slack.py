@@ -103,19 +103,6 @@ def test_extract_user_answer_keeps_plain_thread_reply(monkeypatch):
     assert main.extract_user_answer(event) == "내 답변"
 
 
-def test_extract_question_from_parent_returns_body_after_newline():
-    parent = "*[Q001] ☕ Java | 제목*\nJava의 GC는 어떻게 동작하는가?"
-    assert main.extract_question_from_parent(parent) == "Java의 GC는 어떻게 동작하는가?"
-
-
-def test_extract_question_from_parent_falls_back_to_full_text_without_newline():
-    assert main.extract_question_from_parent("개행 없는 텍스트") == "개행 없는 텍스트"
-
-
-def test_extract_question_from_parent_handles_empty():
-    assert main.extract_question_from_parent("") == ""
-    assert main.extract_question_from_parent(None) == ""
-
 
 def test_parse_parent_header_full():
     qid, cat, title = main.parse_parent_header(

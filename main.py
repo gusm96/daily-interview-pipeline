@@ -484,15 +484,6 @@ def _index_text(files, slug):
     return text or ""
 
 
-def extract_question_from_parent(parent_text):
-    """질문 카드 형식(*[Qxxx] 카테고리 | 제목*\n질문)에서 질문 본문만 추출.
-    개행이 없으면 형식 불일치로 보고 원문 전체를 그대로 반환한다(방어적 폴백)."""
-    if not parent_text:
-        return ""
-    idx = parent_text.find("\n")
-    if idx == -1:
-        return parent_text.strip()
-    return parent_text[idx + 1:].strip()
 
 
 # 부모 카드: *[Qxxx] 카테고리 | 제목*  (카테고리는 CATEGORIES 원문 중 하나)
