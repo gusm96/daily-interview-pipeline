@@ -74,6 +74,10 @@ docker-compose.override.yml
 *.temp
 *~
 
+# draw.io backup/lock artifacts
+.$*.bkp
+*.dtmp
+
 # Python packaging & distribution build artifacts
 build/
 develop-eggs/
