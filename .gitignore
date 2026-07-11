@@ -104,3 +104,5 @@ manifest
 .claude/
 .gemini/
 
+# Planning/spec docs are kept local, not committed (project policy)
+docs/superpowers/
