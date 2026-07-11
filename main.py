@@ -13,13 +13,6 @@ from slack_sdk import WebClient
 from prompts import CATEGORIES, QUESTION_GENERATION_PROMPT, MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
 import storage
 
-
-
-
-
-
-
-
 _FENCE_RE = re.compile(r"^\s*```[a-zA-Z]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
 
 
@@ -358,6 +351,7 @@ REQUIRED_ENV = [
     "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET", "SLACK_CHANNEL_ID", "SLACK_BOT_USER_ID",
 ]
 
+
 def validate_env():
     """누락된 필수 환경변수 목록 반환(빈 리스트면 OK)."""
     return [k for k in REQUIRED_ENV if not os.environ.get(k)]
@@ -482,8 +476,6 @@ def _index_text(files, slug):
         return files[path]
     text, _ = github_get_file(path)
     return text or ""
-
-
 
 
 # 부모 카드: *[Qxxx] 카테고리 | 제목*  (카테고리는 CATEGORIES 원문 중 하나)
@@ -691,19 +683,3 @@ def daily_interview_bot(request):
         return ("OK", 200)
 
     return ("ignored", 200)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
