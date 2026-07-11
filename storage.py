@@ -254,7 +254,6 @@ def build_readme_window(questions, limit=README_TOP_N_PER_CATEGORY):
 
 
 AI_AUTO_TAG = "[⚠️ AI 자동 작성 답변 - 미응시]"
-_MARKER_RE = re.compile(r"<!-- q (Q\d{3,}) (\w+) ([\d-]+) -->")
 
 
 # 한 토글(리스트 아이템) 전체: 마커부터 </details>까지
