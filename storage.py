@@ -121,7 +121,7 @@ def _index_rows(index_text):
             for m in _INDEX_ROW_RE.finditer(index_text or "")]
 
 
-def _render_index(slug, category, rows):
+def _render_index(category, rows):
     rows = sorted(rows, key=lambda r: r[0], reverse=True)  # ID 내림차순
     header = f"# {category} — 전체 문제 (총 {len(rows)}개)\n\n"
     table = "| ID | 제목 | 출제일 | 상태 |\n| --- | --- | --- | --- |\n"
@@ -136,7 +136,7 @@ def upsert_index_row(index_text, slug, category, qid, title, date, status):
     """qid 행을 추가하거나 갱신한 인덱스 텍스트 반환(총 개수·정렬 유지)."""
     rows = [r for r in _index_rows(index_text) if r[0] != qid]
     rows.append((qid, title, date, status))
-    return _render_index(slug, category, rows)
+    return _render_index(category, rows)
 
 
 def existing_titles_block(index_texts_by_slug):
