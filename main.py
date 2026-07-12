@@ -497,7 +497,9 @@ def parse_parent_header(parent_text):
 
 
 def _find_slug_for_qid(qid):
-    """카테고리 미확인 시 5개 인덱스를 스캔해 qid가 속한 slug를 찾음. 없으면 None."""
+    """카테고리 미확인(부모 헤더 파싱 실패)일 때만 실행되는 폴백.
+    5개 인덱스를 순차 조회하므로 정상 경로에서는 호출되지 않는다.
+    빈도가 높아지면(로그로 측정) 배치 조회 도입을 검토한다. 없으면 None."""
     for slug in storage.SLUGS:
         text, _ = github_get_file(f"{slug}/{slug}.md")
         if text and qid in text:
@@ -521,7 +523,11 @@ def handle_slack_event(payload):
         logger.info("부모 메시지에서 질문 ID를 찾지 못함")
         return
 
-    slug = storage.slug_for(category) if category else _find_slug_for_qid(qid)
+    if category:
+        slug = storage.slug_for(category)
+    else:
+        logger.info("부모 헤더 카테고리 파싱 실패, 인덱스 스캔 폴백: %s", qid)
+        slug = _find_slug_for_qid(qid)
     if not slug:
         logger.warning("qid의 카테고리를 찾지 못함: %s", qid)
         return
