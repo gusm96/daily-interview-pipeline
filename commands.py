@@ -1,3 +1,4 @@
+import os
 from config import _MENTION_TOKEN_RE, _CONFIG_SET_RE, _FIRST_INT_RE
 
 def parse_mention_command(text, bot_user_id=None):
@@ -26,3 +27,13 @@ def build_help_text():
         "💬 *답변 방법*: 봇이 보낸 질문 메시지에 *스레드 답글*로 답하면 AI가 채점·피드백합니다.\n"
         "ℹ️ 답변하지 않은 질문은 다음 날 오전 7시에 AI 모범답안이 자동 작성됩니다."
     )
+
+
+def is_authorized_user(event):
+    """SLACK_ALLOWED_USER_IDS(쉼표 구분)가 설정돼 있으면 해당 사용자만 쓰기/생성 명령 허용.
+    미설정이면 제한 없음(기존 단일 사용자 동작 유지, R-2)."""
+    allowed = os.environ.get("SLACK_ALLOWED_USER_IDS", "").strip()
+    if not allowed:
+        return True
+    ids = {x.strip() for x in allowed.split(",") if x.strip()}
+    return event.get("user", "") in ids

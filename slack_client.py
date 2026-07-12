@@ -1,10 +1,33 @@
 import os
 import re
+import time
+import hmac
+import hashlib
 import logging
 from slack_sdk import WebClient
 import storage
 
 logger = logging.getLogger("daily_interview_bot")
+
+
+def verify_slack_signature(request):
+    """Slack 서명검증: HMAC-SHA256(v0:{ts}:{body}), 5분 윈도우, 상수시간 비교."""
+    secret = os.environ.get("SLACK_SIGNING_SECRET", "")
+    ts = request.headers.get("X-Slack-Request-Timestamp", "")
+    sig = request.headers.get("X-Slack-Signature", "")
+    if not secret or not ts or not sig:
+        return False
+    try:
+        if abs(time.time() - int(ts)) > 60 * 5:
+            return False
+    except ValueError:
+        return False
+    body = request.get_data()
+    if isinstance(body, str):
+        body = body.encode()
+    basestring = f"v0:{ts}:".encode() + body
+    expected = "v0=" + hmac.new(secret.encode(), basestring, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
 
 _QID_RE = re.compile(r"\[Q(\d{3,})\]")
 
