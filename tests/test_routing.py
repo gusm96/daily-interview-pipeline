@@ -609,3 +609,37 @@ def test_model_answer_prompt_has_question_placeholder():
     from prompts import MODEL_ANSWER_PROMPT
     rendered = MODEL_ANSWER_PROMPT.format(question="테스트 질문")
     assert "테스트 질문" in rendered
+
+
+def test_handle_slack_event_reads_each_file_once(monkeypatch):
+    import main, storage
+    calls = []
+    qfile = storage.render_question_file(storage.Question(
+        "Q001", "Java", "☕ Java", "제목", "2026-07-11", "질문본문"))
+    idx = storage.upsert_index_row("", "Java", "☕ Java", "Q001", "제목", "2026-07-11", "⬜ 미답변")
+
+    def fake_get(path):
+        calls.append(path)
+        if path.endswith("Q001.md"):
+            return qfile, "sha"
+        if path.endswith("Java.md"):
+            return idx, "sha"
+        if path == "README.md":
+            return storage.EMPTY_README, "sha"
+        return None, None
+
+    monkeypatch.setattr(main, "github_get_file", fake_get)
+    monkeypatch.setattr(main, "call_gemini", lambda *a, **k: "피드백")
+    monkeypatch.setattr(main, "slack_get_thread_parent",
+                        lambda c, t: "*[Q001] ☕ Java | 제목*\n질문본문")
+    monkeypatch.setattr(main, "slack_post_message", lambda *a, **k: None)
+    monkeypatch.setattr(main, "github_commit_files", lambda *a, **k: "sha")
+
+    main.handle_slack_event({"event": {
+        "channel": "C1", "thread_ts": "1", "user": "U1", "text": "내 답변", "ts": "2"}})
+
+    # 카테고리를 부모 헤더에서 파싱하므로 _find_slug_for_qid 스캔이 없어야 함.
+    # 같은 경로를 두 번 이상 GET 하지 않는다.
+    assert calls.count("Java/Q001.md") == 1
+    assert calls.count("README.md") == 1
+    assert len([c for c in calls if c.endswith("/Java.md")]) == 1
