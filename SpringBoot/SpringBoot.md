@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 16개)
+# 🌱 Spring Boot — 전체 문제 (총 17개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q088](./Q088.md) | Spring Data JPA Querydsl 활용 | 2026-07-13 | ⬜ 미답변 |
+| [Q093](./Q093.md) | Spring Data JPA 영속성 컨텍스트 동작 | 2026-07-14 | ⬜ 미답변 |
+| [Q088](./Q088.md) | Spring Data JPA Querydsl 활용 | 2026-07-13 | 🤖 자동답안 |
 | [Q083](./Q083.md) | Spring Boot Actuator 활용과 모니터링 | 2026-07-12 | 🤖 자동답안 |
 | [Q078](./Q078.md) | Spring Data JPA 지연 로딩과 즉시 로딩 | 2026-07-11 | 🤖 자동답안 |
 | [Q073](./Q073.md) | Spring Transactional 전파 레벨과 동작 | 2026-07-10 | 🤖 자동답안 |
