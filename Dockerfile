@@ -6,8 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy only the entrypoint source code
-COPY main.py .
+# Copy runtime source code (entrypoint + its imported modules)
+COPY main.py storage.py prompts.py retry.py github_client.py gemini_client.py slack_client.py config.py commands.py handlers.py ./
 
 # Functions Framework uses port 8080 by default on GCP
 EXPOSE 8080
