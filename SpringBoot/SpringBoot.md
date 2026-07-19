@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 22개)
+# 🌱 Spring Boot — 전체 문제 (총 23개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q118](./Q118.md) | Spring Data JPA의 Query Method 파싱 원리 | 2026-07-19 | ⬜ 미답변 |
+| [Q123](./Q123.md) | Spring Boot의 자동 구성 원리와 커스터마이징 | 2026-07-20 | ⬜ 미답변 |
+| [Q118](./Q118.md) | Spring Data JPA의 Query Method 파싱 원리 | 2026-07-19 | 🤖 자동답안 |
 | [Q113](./Q113.md) | Spring의 @Value와 Environment 추상화 | 2026-07-18 | 🤖 자동답안 |
 | [Q108](./Q108.md) | Spring MVC 요청 처리 흐름과 DispatcherServlet | 2026-07-17 | 🤖 자동답안 |
 | [Q103](./Q103.md) | Spring Data JPA 커스텀 리포지토리 구현 | 2026-07-16 | 🤖 자동답안 |
