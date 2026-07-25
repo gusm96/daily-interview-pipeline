@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 28개)
+# 🌱 Spring Boot — 전체 문제 (총 29개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q148](./Q148.md) | Spring Data JPA의 Projection 활용 | 2026-07-25 | ⬜ 미답변 |
+| [Q153](./Q153.md) | Spring MVC의 데이터 바인딩과 검증 | 2026-07-26 | ⬜ 미답변 |
+| [Q148](./Q148.md) | Spring Data JPA의 Projection 활용 | 2026-07-25 | 🤖 자동답안 |
 | [Q143](./Q143.md) | Spring MVC의 HandlerMethodArgumentResolver 활용 | 2026-07-24 | 🤖 자동답안 |
 | [Q138](./Q138.md) | Spring Boot 외부 설정 관리와 프로파일 | 2026-07-23 | 🤖 자동답안 |
 | [Q133](./Q133.md) | Spring MVC 필터와 인터셉터의 차이 | 2026-07-22 | 🤖 자동답안 |
