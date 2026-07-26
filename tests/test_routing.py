@@ -604,7 +604,7 @@ def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
     monkeypatch.setattr(handlers, "call_gemini",
                         lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
     main.run_generate_routine()
-    assert calls["n"] == main._MAX_FILL_PER_RUN
+    assert calls["n"] == handlers._MAX_FILL_PER_RUN
 
 
 def test_model_answer_prompt_has_question_placeholder():
