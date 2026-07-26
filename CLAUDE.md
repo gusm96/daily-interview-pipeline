@@ -27,7 +27,8 @@
 
 ## 설계 명세서
 
-`docs/superpowers/specs/2026-06-18-daily-interview-bot-design.md`
+설계·계획 문서는 정책상 커밋하지 않고 로컬(`docs/superpowers/`)에만 보관한다.
+초기 설계 명세: `docs/superpowers/specs/2026-06-18-daily-interview-bot-design.md` (로컬 전용).
 
 ## 검증
 

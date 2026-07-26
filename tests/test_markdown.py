@@ -1,4 +1,5 @@
 import main
+import slack_client
 
 
 def test_strip_outer_markdown_fence():
@@ -21,13 +22,16 @@ def test_strip_no_fence_returns_trimmed():
 
 
 def test_parse_question_id_bracket_anchor():
-    assert main.parse_question_id("오늘의 질문 [Q016] 입니다") == "Q016"
+    assert slack_client.parse_question_id("[Q001] 제목") == "Q001"
+    assert slack_client.parse_question_id("[Q999] 제목") == "Q999"
+    assert slack_client.parse_question_id(" *[Q012]* 제목 ") == "Q012"
 
 
 def test_parse_question_id_ignores_bare_text():
-    # 대괄호 없는 Q001은 무시 (오탐 방지)
-    assert main.parse_question_id("Q001 이 뭔가요?") is None
+    assert slack_client.parse_question_id("Q001 제목") is None
 
 
 def test_parse_question_id_none_when_absent():
-    assert main.parse_question_id("ID 없는 메시지") is None
+    assert slack_client.parse_question_id(None) is None
+    assert slack_client.parse_question_id("") is None
+    assert slack_client.parse_question_id("제목만 있는 질문") is None
