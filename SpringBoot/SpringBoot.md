@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 30개)
+# 🌱 Spring Boot — 전체 문제 (총 31개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q158](./Q158.md) | Spring의 빈 후처리기와 확장 포인트 | 2026-07-27 | ⬜ 미답변 |
+| [Q163](./Q163.md) | Spring의 @Controller와 @RestController 차이 | 2026-07-28 | ⬜ 미답변 |
+| [Q158](./Q158.md) | Spring의 빈 후처리기와 확장 포인트 | 2026-07-27 | 🤖 자동답안 |
 | [Q153](./Q153.md) | Spring MVC의 데이터 바인딩과 검증 | 2026-07-26 | 🤖 자동답안 |
 | [Q148](./Q148.md) | Spring Data JPA의 Projection 활용 | 2026-07-25 | 🤖 자동답안 |
 | [Q143](./Q143.md) | Spring MVC의 HandlerMethodArgumentResolver 활용 | 2026-07-24 | 🤖 자동답안 |
