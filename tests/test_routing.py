@@ -187,9 +187,16 @@ def test_run_generate_uses_and_clamps_config_default(monkeypatch):
         return [("☕ Java", "t", "q")]
 
     monkeypatch.setattr(handlers, "generate_questions", fake_generate)
-    readme = "<!-- config:default=50 -->\n" + storage.EMPTY_README
-    monkeypatch.setattr(handlers, "github_get_file",
-                        lambda path: (readme, "s") if path == "README.md" else ("", None))
+    readme = storage.EMPTY_README
+
+    def fake_get(path):
+        if path == "README.md":
+            return readme, "s"
+        if path == "state.json":
+            return '{"daily_count": 50}', "s"
+        return "", None
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
     monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
     monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
     main.run_generate_routine()
@@ -385,7 +392,7 @@ def test_handle_app_mention_config_show(monkeypatch):
     monkeypatch.setattr(handlers, "slack_post_message",
                         lambda ch, text, thread_ts=None: posted.append(text))
     monkeypatch.setattr(handlers, "github_get_file",
-                        lambda path: ("<!-- config:default=7 -->\n# r", "s"))
+                        lambda path: ('{"daily_count": 7}', "s"))
     main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config"})
     assert "7" in posted[0]
 
@@ -395,11 +402,15 @@ def test_handle_app_mention_config_set_commits(monkeypatch):
     commits = []
     monkeypatch.setattr(handlers, "slack_post_message",
                         lambda ch, text, thread_ts=None: posted.append(text))
-    monkeypatch.setattr(handlers, "github_get_file", lambda path: ("# r\n", "s"))
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5}', "s"))
     monkeypatch.setattr(handlers, "github_commit_files",
-                        lambda files, message, **kw: commits.append(message))
+                        lambda files, message, **kw: commits.append((files, message)))
     main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config --default=4"})
-    assert commits  # 커밋 발생
+    assert commits                                    # 커밋 발생
+    files, _ = commits[0]
+    assert list(files) == ["state.json"]              # README를 커밋하지 않는다
+    assert '"daily_count": 4' in files["state.json"]
     assert "4" in posted[-1]
 
 
@@ -645,3 +656,37 @@ def test_handle_slack_event_reads_each_file_once(monkeypatch):
     assert calls.count("Java/Q001.md") == 1
     assert calls.count("README.md") == 1
     assert len([c for c in calls if c.endswith("/Java.md")]) == 1
+
+
+def test_config_set_preserves_unknown_fields(monkeypatch):
+    # 확장 기능을 위해 paused_until 같은 필드를 config 명령이 지우면 안 된다
+    commits = []
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5, "paused_until": "2026-08-01"}', "s"))
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: commits.append(files))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config --default=8"})
+    assert '"paused_until": "2026-08-01"' in commits[0]["state.json"]
+
+
+def test_run_generate_routine_falls_back_when_state_missing(monkeypatch):
+    # state.json이 없어도(404) 기본값 5로 동작한다
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    captured = {}
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+
+    def fake_generate(r, count=5):
+        captured["count"] = count
+        return [("☕ Java", "t", "q")]
+
+    monkeypatch.setattr(handlers, "generate_questions", fake_generate)
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: (storage.EMPTY_README, "s") if path == "README.md"
+                        else (None, None))
+    monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-28")
+    main.run_generate_routine()
+    assert captured["count"] == 5
