@@ -9,7 +9,7 @@ from slack_client import (
     slack_post_message, slack_get_thread_parent,
     extract_user_answer, parse_parent_header, is_bot_or_self,
 )
-from config import today_kst_iso, get_config_default, set_config_default, validate_env
+from config import today_kst_iso, validate_env
 from state import parse_state, render_state
 from commands import parse_mention_command, build_help_text, is_authorized_user
 from prompts import MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT

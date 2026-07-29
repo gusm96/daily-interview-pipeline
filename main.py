@@ -21,7 +21,7 @@ from gemini_client import (  # noqa: F401
     GeminiError, FEEDBACK_THINKING_BUDGET,
 )
 from config import (  # noqa: F401
-    validate_env, today_kst_iso, get_config_default, set_config_default,
+    validate_env, today_kst_iso,
 )
 from state import parse_state, render_state, DEFAULTS as STATE_DEFAULTS  # noqa: F401
 from commands import (  # noqa: F401

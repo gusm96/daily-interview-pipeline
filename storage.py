@@ -189,7 +189,6 @@ def _cat_end(slug):
 
 
 EMPTY_README = (
-    "<!-- config:default=5 -->\n"
     "# daily-interview-pipeline\n"
     "GCP Cloud Functions & Gemini API를 이용해 매일 아침 자동으로 빌드되는 "
     "백엔드 기술 면접 독학 저장소\n\n"
