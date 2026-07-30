@@ -9,7 +9,8 @@ from slack_client import (
     slack_post_message, slack_get_thread_parent,
     extract_user_answer, parse_parent_header, is_bot_or_self,
 )
-from config import today_kst_iso, get_config_default, set_config_default, validate_env
+from config import today_kst_iso, validate_env
+from state import parse_state, render_state
 from commands import parse_mention_command, build_help_text, is_authorized_user
 from prompts import MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
 
@@ -49,6 +50,8 @@ def run_generate_routine():
     readme, _ = github_get_file("README.md")
     if readme is None:
         readme = storage.EMPTY_README
+    state_text, _ = github_get_file("state.json")
+    cfg = parse_state(state_text)
     files = {}
     today = today_kst_iso()
 
@@ -66,7 +69,7 @@ def run_generate_routine():
             idx_text, slug, category, qid, title, date, storage.status_label(q))
 
     # 2) 신규 질문 생성 (config default, 1~10 클램프)
-    count = max(1, min(10, get_config_default(readme)))
+    count = max(1, min(10, cfg["daily_count"]))
     files, ids, questions, readme = _generate_and_stage(readme, count, today, files)
 
     # 3) 카테고리별 상위 N개 초과분 prune
@@ -193,24 +196,29 @@ def handle_app_mention(event):
         return
 
     if command == "config_show":
-        readme, _ = github_get_file("README.md")
-        reply(f"현재 기본 생성 개수: {get_config_default(readme or '')}개")
+        state_text, _ = github_get_file("state.json")
+        reply(f"현재 기본 생성 개수: {parse_state(state_text)['daily_count']}개")
         return
 
     if command == "config_set":
         if arg is None or arg < 1 or arg > 10:
             reply("기본 생성 개수는 1~10 사이로 입력해주세요. 예: `@봇 config --default=5`")
             return
-        readme, _ = github_get_file("README.md")
-        new_readme, _ = set_config_default(readme or storage.EMPTY_README, arg)
-        github_commit_files({"README.md": new_readme}, f"config default={arg}")
+        state_text, _ = github_get_file("state.json")
+        cfg = parse_state(state_text)
+        cfg["daily_count"] = arg
+        github_commit_files({"state.json": render_state(cfg)}, f"config default={arg}")
         reply(f"기본 생성 개수가 {arg}개로 설정되었습니다.")
         return
 
     if command == "question":
         readme, _ = github_get_file("README.md")
         readme = readme or storage.EMPTY_README
-        n = arg if arg is not None else get_config_default(readme)
+        if arg is not None:
+            n = arg
+        else:
+            state_text, _ = github_get_file("state.json")
+            n = parse_state(state_text)["daily_count"]
         if n < 1 or n > 10:
             reply("질문 개수는 1~10 사이로 입력해주세요. 예: `@봇 질문 3`")
             return
