@@ -30,6 +30,8 @@
 설계·계획 문서는 정책상 커밋하지 않고 로컬(`docs/superpowers/`)에만 보관한다.
 초기 설계 명세: `docs/superpowers/specs/2026-06-18-daily-interview-bot-design.md` (로컬 전용).
 
+`docs/` 전체가 `.gitignore` 대상이다 — 설계·계획서뿐 아니라 AI 생성 리포트(`code_review.md`, `project_introduction.md`)와 draw.io 다이어그램 원본도 로컬 보관한다. 특정 문서를 커밋해야 하면 `git add -f <path>`를 쓴다. 프로젝트 문서는 `docs/`가 아니라 이 파일(CLAUDE.md)에 쓴다.
+
 ## 검증
 
 코드 변경 후 `python -m py_compile main.py`로 구문 검증.
