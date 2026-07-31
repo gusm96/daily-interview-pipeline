@@ -33,6 +33,7 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+htmlcov/
 
 # Virtual environments
 venv/
@@ -74,6 +75,10 @@ docker-compose.override.yml
 *.temp
 *~
 
+# Merge & patch leftovers
+*.orig
+*.rej
+
 # draw.io backup/lock artifacts
 .$*.bkp
 *.dtmp
@@ -103,6 +108,15 @@ manifest
 .npm/
 .claude/
 .gemini/
+.superpowers/
+.understand-anything/
 
-# Planning/spec docs are kept local, not committed (project policy)
-docs/superpowers/
+# Linter & type checker caches
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+
+# Docs are kept local, not committed (project policy):
+# planning/spec docs, AI-generated reports, draw.io diagram sources.
+# Use `git add -f <path>` if a specific doc ever needs to be committed.
+docs/
