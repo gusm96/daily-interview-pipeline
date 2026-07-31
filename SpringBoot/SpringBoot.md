@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 34개)
+# 🌱 Spring Boot — 전체 문제 (총 35개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q176](./Q176.md) | Spring의 빈 스코프와 활용 전략 | 2026-07-31 | ⬜ 미답변 |
+| [Q179](./Q179.md) | Spring Data JPA의 N+1 문제 해결 전략 | 2026-08-01 | ⬜ 미답변 |
+| [Q176](./Q176.md) | Spring의 빈 스코프와 활용 전략 | 2026-07-31 | 🤖 자동답안 |
 | [Q171](./Q171.md) | Spring Data JPA의 Query By Example 활용 | 2026-07-30 | 🤖 자동답안 |
 | [Q168](./Q168.md) | Spring MVC의 요청 처리 흐름과 확장 지점 | 2026-07-29 | 🤖 자동답안 |
 | [Q163](./Q163.md) | Spring의 @Controller와 @RestController 차이 | 2026-07-28 | 🤖 자동답안 |
