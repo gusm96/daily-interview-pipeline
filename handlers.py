@@ -10,14 +10,11 @@ from slack_client import (
     extract_user_answer, parse_parent_header, is_bot_or_self,
 )
 from config import today_kst_iso, validate_env
-from state import parse_state, render_state
+from state import parse_state, render_state, in_range, range_text
 from commands import parse_mention_command, build_help_text, is_authorized_user
 from prompts import MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
 
 logger = logging.getLogger("daily_interview_bot")
-
-
-_MAX_FILL_PER_RUN = 10  # 1회 실행당 모범답안 자동생성 상한(순차 Gemini 누적→타임아웃 방지)
 
 
 def _generate_and_stage(readme, count, today, files=None):
@@ -51,12 +48,15 @@ def run_generate_routine():
     if readme is None:
         readme = storage.EMPTY_README
     state_text, _ = github_get_file("state.json")
-    cfg = parse_state(state_text)
+    state_warnings = []
+    cfg = parse_state(state_text, state_warnings)
+    if state_warnings:
+        _notify_state_warnings(state_warnings)
     files = {}
     today = today_kst_iso()
 
     # 1) 창 안 미답변 → 모범답안 생성 후 README 패치 + 문제 파일 + 인덱스
-    for qid, slug, date, title, question in storage.scan_window_unanswered(readme)[:_MAX_FILL_PER_RUN]:
+    for qid, slug, date, title, question in storage.scan_window_unanswered(readme)[:cfg["max_fill_per_run"]]:
         answer = call_gemini(MODEL_ANSWER_PROMPT.format(question=question), temperature=0.1)
         feedback = "(AI 자동 작성 - 검토 필요)"
         readme = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=True)
@@ -68,12 +68,12 @@ def run_generate_routine():
         files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
             idx_text, slug, category, qid, title, date, storage.status_label(q))
 
-    # 2) 신규 질문 생성 (config default, 1~10 클램프)
-    count = max(1, min(10, cfg["daily_count"]))
+    # 2) 신규 질문 생성 (parse_state가 이미 범위로 클램프해 둔 값)
+    count = cfg["daily_count"]
     files, ids, questions, readme = _generate_and_stage(readme, count, today, files)
 
     # 3) 카테고리별 상위 N개 초과분 prune
-    readme = storage.prune_overflow(readme)
+    readme = storage.prune_overflow(readme, cfg["readme_top_n"])
     files["README.md"] = readme
 
     # 4) 1커밋
@@ -86,6 +86,24 @@ def run_generate_routine():
             slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
         except Exception:
             logger.exception("Slack 질문 전송 실패: %s", qid)
+
+
+def _notify_state_warnings(warnings):
+    """state.json을 보정한 사실을 Slack에 알린다.
+
+    로그만 남기면 아무도 읽지 않아 잘못된 설정이 오래 방치된다. 전송이 실패해도
+    질문 배달이 막히면 안 되므로 예외는 삼킨다(기존 Slack 전송과 같은 정책)."""
+    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    if not channel:
+        return
+    lines = "\n".join(f"• {w}" for w in warnings)
+    try:
+        slack_post_message(
+            channel,
+            f"⚠️ state.json 설정을 보정했습니다\n{lines}\n질문은 정상 생성했습니다.",
+        )
+    except Exception:
+        logger.exception("state.json 보정 알림 전송 실패")
 
 
 def _index_text(files, slug):
@@ -201,8 +219,8 @@ def handle_app_mention(event):
         return
 
     if command == "config_set":
-        if arg is None or arg < 1 or arg > 10:
-            reply("기본 생성 개수는 1~10 사이로 입력해주세요. 예: `@봇 config --default=5`")
+        if arg is None or not in_range("daily_count", arg):
+            reply(f"기본 생성 개수는 {range_text('daily_count')} 사이로 입력해주세요. 예: `@봇 config --default=5`")
             return
         state_text, _ = github_get_file("state.json")
         cfg = parse_state(state_text)
@@ -219,8 +237,8 @@ def handle_app_mention(event):
         else:
             state_text, _ = github_get_file("state.json")
             n = parse_state(state_text)["daily_count"]
-        if n < 1 or n > 10:
-            reply("질문 개수는 1~10 사이로 입력해주세요. 예: `@봇 질문 3`")
+        if not in_range("daily_count", n):
+            reply(f"질문 개수는 {range_text('daily_count')} 사이로 입력해주세요. 예: `@봇 질문 3`")
             return
         today = today_kst_iso()
         files, ids, questions, new_readme = _generate_and_stage(readme, n, today)
