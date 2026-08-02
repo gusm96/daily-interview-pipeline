@@ -1,8 +1,9 @@
-# 🌱 Spring Boot — 전체 문제 (총 36개)
+# 🌱 Spring Boot — 전체 문제 (총 37개)
 
 | ID | 제목 | 출제일 | 상태 |
 | --- | --- | --- | --- |
-| [Q182](./Q182.md) | Spring Boot 애플리케이션의 Graceful Shutdown 구현 | 2026-08-02 | ⬜ 미답변 |
+| [Q187](./Q187.md) | Spring Boot의 내장 웹 서버와 커스터마이징 | 2026-08-03 | ⬜ 미답변 |
+| [Q182](./Q182.md) | Spring Boot 애플리케이션의 Graceful Shutdown 구현 | 2026-08-02 | 🤖 자동답안 |
 | [Q179](./Q179.md) | Spring Data JPA의 N+1 문제 해결 전략 | 2026-08-01 | 🤖 자동답안 |
 | [Q176](./Q176.md) | Spring의 빈 스코프와 활용 전략 | 2026-07-31 | 🤖 자동답안 |
 | [Q171](./Q171.md) | Spring Data JPA의 Query By Example 활용 | 2026-07-30 | 🤖 자동답안 |
