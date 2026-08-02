@@ -67,5 +67,84 @@ def test_render_state_is_deterministic_regardless_of_key_order():
 
 
 def test_round_trip():
-    original = {"daily_count": 7, "paused_until": "2026-07-30"}
+    original = {"daily_count": 7, "max_fill_per_run": 8, "readme_top_n": 3,
+                "paused_until": "2026-07-30"}
     assert state.parse_state(state.render_state(original)) == original
+
+
+def test_parse_state_new_keys_have_defaults():
+    s = state.parse_state(None)
+    assert s["max_fill_per_run"] == 10
+    assert s["readme_top_n"] == 5
+
+
+def test_parse_state_clamps_below_minimum():
+    assert state.parse_state('{"readme_top_n": 0}')["readme_top_n"] == 1
+    assert state.parse_state('{"daily_count": 0}')["daily_count"] == 1
+
+
+def test_parse_state_clamps_above_maximum():
+    assert state.parse_state('{"readme_top_n": 99}')["readme_top_n"] == 15
+    assert state.parse_state('{"max_fill_per_run": 50}')["max_fill_per_run"] == 10
+
+
+def test_parse_state_keeps_boundary_values():
+    assert state.parse_state('{"readme_top_n": 15}')["readme_top_n"] == 15
+    assert state.parse_state('{"readme_top_n": 1}')["readme_top_n"] == 1
+
+
+def test_warnings_records_clamped_key_only():
+    w = []
+    state.parse_state('{"readme_top_n": 0, "daily_count": 5}', w)
+    assert len(w) == 1
+    assert "readme_top_n" in w[0]
+
+
+def test_warnings_empty_for_valid_state():
+    w = []
+    state.parse_state('{"daily_count": 5, "max_fill_per_run": 10, "readme_top_n": 5}', w)
+    assert w == []
+
+
+def test_warnings_records_parse_failure():
+    w = []
+    assert state.parse_state('{ "daily_count": ', w) == state.DEFAULTS
+    assert len(w) == 1
+
+
+def test_warnings_records_non_object_top_level():
+    w = []
+    assert state.parse_state("[1, 2]", w) == state.DEFAULTS
+    assert len(w) == 1
+
+
+def test_warnings_records_type_error():
+    w = []
+    state.parse_state('{"readme_top_n": "5"}', w)
+    assert len(w) == 1
+    assert "readme_top_n" in w[0]
+
+
+def test_type_error_takes_precedence_over_range():
+    # "0"은 타입 오류로 기본값 5가 된다. 범위 클램프 대상이 아니므로 경고는 1건이다.
+    w = []
+    s = state.parse_state('{"readme_top_n": "0"}', w)
+    assert s["readme_top_n"] == 5
+    assert len(w) == 1
+
+
+def test_in_range_boundaries():
+    assert state.in_range("daily_count", 1)
+    assert state.in_range("daily_count", 10)
+    assert not state.in_range("daily_count", 0)
+    assert not state.in_range("daily_count", 11)
+
+
+def test_in_range_unknown_key_is_true():
+    assert state.in_range("paused_until", "forever")
+
+
+def test_range_text_formats_bounds():
+    assert state.range_text("daily_count") == "1~10"
+    assert state.range_text("readme_top_n") == "1~15"
+

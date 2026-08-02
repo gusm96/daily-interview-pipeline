@@ -13,9 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import storage  # noqa: E402
 
 
-def build_readme_files(questions):
-    """전체 Question 목록 → {"README.md": 카테고리별 상위 N개로 재구성된 README}."""
-    return {"README.md": storage.build_readme_window(questions)}
+def build_readme_files(questions, limit):
+    """전체 Question 목록 → {"README.md": 카테고리별 상위 limit개로 재구성된 README}."""
+    return {"README.md": storage.build_readme_window(questions, limit)}
 
 
 def _qids_from_index(idx_text):
@@ -29,6 +29,11 @@ def _qids_from_index(idx_text):
 
 if __name__ == "__main__":
     import main
+    from state import parse_state
+
+    # 루틴 A의 prune과 같은 개수를 써야 한다. 다르면 이 복구 도구가 드리프트를 만든다.
+    state_text, _ = main.github_get_file("state.json")
+    limit = parse_state(state_text)["readme_top_n"]
 
     questions = []
     for slug in storage.SLUGS:
@@ -38,7 +43,7 @@ if __name__ == "__main__":
             if text:
                 questions.append(storage.parse_question_file(text))
 
-    files = build_readme_files(questions)
+    files = build_readme_files(questions, limit)
     print(f"재구성 대상 파일 {len(files)}개")
     for path in sorted(files):
         print(" -", path)

@@ -10,14 +10,14 @@ def _q(**kw):
 
 
 def test_build_readme_files_returns_readme_only():
-    files = build_readme_files([_q()])
+    files = build_readme_files([_q()], 5)
     assert list(files.keys()) == ["README.md"]
     assert "q Q001" in files["README.md"]
 
 
 def test_build_readme_files_keeps_top_n_per_category():
     qs = [_q(id=f"Q{i:03d}", date=f"2026-07-{i:02d}") for i in range(1, 8)]  # CS 7개
-    files = build_readme_files(qs)
+    files = build_readme_files(qs, 5)
     readme = files["README.md"]
     for qid in ["Q003", "Q004", "Q005", "Q006", "Q007"]:
         assert f"q {qid}" in readme
@@ -35,3 +35,9 @@ def test_qids_from_index_preserves_order_multiple_rows():
     idx = ("| [Q061](./Q061.md) | a | 2026-07-08 | ⬜ 미답변 |\n"
            "| [Q056](./Q056.md) | b | 2026-07-07 | 🤖 자동답안 |\n")
     assert _qids_from_index(idx) == ["Q061", "Q056"]
+
+
+def test_build_readme_files_honors_custom_limit():
+    qs = [_q(id=f"Q{i:03d}", date=f"2026-07-{i:02d}") for i in range(1, 8)]  # CS 7개
+    readme = build_readme_files(qs, 2)["README.md"]
+    assert readme.count("<!-- q Q") == 2

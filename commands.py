@@ -1,5 +1,6 @@
 import os
 from config import _MENTION_TOKEN_RE, _CONFIG_SET_RE, _FIRST_INT_RE
+from state import range_text
 
 def parse_mention_command(text, bot_user_id=None):
     """app_mention 텍스트를 파싱해 (command, arg) 반환. 범위 검증은 호출부 담당.
@@ -20,7 +21,7 @@ def build_help_text():
     return (
         "🤖 *Daily Interview Bot 명령어*\n\n"
         "• `@봇 질문` — 질문 추가 생성 (기본 N개)\n"
-        "• `@봇 질문 3` — 질문 3개 추가 생성 (1~10)\n"
+        f"• `@봇 질문 3` — 질문 3개 추가 생성 ({range_text('daily_count')})\n"
         "• `@봇 config` — 현재 기본 생성 개수 확인\n"
         "• `@봇 config --default=5` — 기본 생성 개수 설정 (매일 자동 생성 수에도 적용)\n"
         "• `@봇 help` — 이 도움말\n\n"
