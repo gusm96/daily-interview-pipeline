@@ -2,7 +2,6 @@
 import re
 from dataclasses import dataclass
 
-README_TOP_N_PER_CATEGORY = 5
 
 # 카테고리 원문(prompts.CATEGORIES) → 경로용 ASCII 슬러그. 유일 소스.
 CATEGORY_SLUGS = {
@@ -189,7 +188,6 @@ def _cat_end(slug):
 
 
 EMPTY_README = (
-    "<!-- config:default=5 -->\n"
     "# daily-interview-pipeline\n"
     "GCP Cloud Functions & Gemini API를 이용해 매일 아침 자동으로 빌드되는 "
     "백엔드 기술 면접 독학 저장소\n\n"
@@ -240,7 +238,7 @@ def insert_toggle(readme, toggle):
     return readme[:idx] + toggle + "\n" + rest
 
 
-def build_readme_window(questions, limit=README_TOP_N_PER_CATEGORY):
+def build_readme_window(questions, limit):
     """전체 Question 목록 → 카테고리별 상위 limit개만 반영한 새 README(EMPTY_README 기준 재구성)."""
     by_slug = {}
     for q in questions:
@@ -301,7 +299,7 @@ def _iter_toggles(readme):
     return out
 
 
-def prune_overflow(readme, limit=README_TOP_N_PER_CATEGORY):
+def prune_overflow(readme, limit):
     """카테고리별로 최신 limit개만 남기고 초과분 토글을 제거. 섹션이 비면 플레이스홀더 복구."""
     for slug in SLUGS:
         toggles = [t for qid, s, date, t in _iter_toggles(readme) if s == slug]

@@ -12,7 +12,7 @@ from slack_client import verify_slack_signature, slack_post_message
 import handlers  # noqa: F401
 from handlers import (  # noqa: F401
     run_generate_routine, handle_slack_event, handle_app_mention,
-    _generate_and_stage, _index_text, _find_slug_for_qid, _MAX_FILL_PER_RUN,
+    _generate_and_stage, _index_text, _find_slug_for_qid,
 )
 from retry import _request_with_retry  # noqa: F401
 from github_client import github_get_file, github_commit_files  # noqa: F401
@@ -21,7 +21,11 @@ from gemini_client import (  # noqa: F401
     GeminiError, FEEDBACK_THINKING_BUDGET,
 )
 from config import (  # noqa: F401
-    validate_env, today_kst_iso, get_config_default, set_config_default,
+    validate_env, today_kst_iso,
+)
+from state import (  # noqa: F401
+    parse_state, render_state, in_range, range_text,
+    DEFAULTS as STATE_DEFAULTS, LIMITS as STATE_LIMITS,
 )
 from commands import (  # noqa: F401
     is_authorized_user, parse_mention_command, build_help_text,

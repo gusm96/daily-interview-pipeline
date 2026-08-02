@@ -40,3 +40,10 @@ def test_build_help_text_lists_commands():
     assert "config --default=" in text
     assert "help" in text
     assert "스레드" in text  # 답변 방법 안내 포함
+
+
+def test_build_help_text_range_follows_limits(monkeypatch):
+    # 도움말의 범위 안내가 LIMITS를 따라가야 한다. 하드코딩으로 되돌아가면 여기서 잡힌다.
+    import state
+    monkeypatch.setitem(state.LIMITS, "daily_count", (1, 20))
+    assert "1~20" in main.build_help_text()

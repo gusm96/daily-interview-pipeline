@@ -27,8 +27,13 @@ def test_status_label_priority():
     assert storage.status_label(q) == "✅ 답변완료"
 
 
-def test_top_n_per_category_is_five():
-    assert storage.README_TOP_N_PER_CATEGORY == 5
+def test_window_functions_require_explicit_limit():
+    # 기본값이 부활하면 limit을 안 넘긴 호출부가 조용히 5를 쓰게 되어 드리프트가 재발한다
+    import pytest
+    with pytest.raises(TypeError):
+        storage.prune_overflow("readme")
+    with pytest.raises(TypeError):
+        storage.build_readme_window([])
 
 
 def test_empty_readme_has_category_sections_and_links():
@@ -305,5 +310,5 @@ def test_build_readme_window_keeps_top_n_per_category():
 def test_build_readme_window_separates_by_category():
     qs = [_q(id="Q001"),
           _q(id="Q002", slug="Java", category=storage.category_for_slug("Java"))]
-    r = storage.build_readme_window(qs)
+    r = storage.build_readme_window(qs, limit=5)
     assert "q Q001" in r and "q Q002" in r

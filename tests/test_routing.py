@@ -3,6 +3,7 @@ import pytest
 import main
 import handlers
 import config
+import state
 
 REQUIRED = [
     "GITHUB_TOKEN", "REPO_OWNER", "REPO_NAME", "GEMINI_API_KEY",
@@ -187,9 +188,16 @@ def test_run_generate_uses_and_clamps_config_default(monkeypatch):
         return [("☕ Java", "t", "q")]
 
     monkeypatch.setattr(handlers, "generate_questions", fake_generate)
-    readme = "<!-- config:default=50 -->\n" + storage.EMPTY_README
-    monkeypatch.setattr(handlers, "github_get_file",
-                        lambda path: (readme, "s") if path == "README.md" else ("", None))
+    readme = storage.EMPTY_README
+
+    def fake_get(path):
+        if path == "README.md":
+            return readme, "s"
+        if path == "state.json":
+            return '{"daily_count": 50}', "s"
+        return "", None
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
     monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
     monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
     main.run_generate_routine()
@@ -385,7 +393,7 @@ def test_handle_app_mention_config_show(monkeypatch):
     monkeypatch.setattr(handlers, "slack_post_message",
                         lambda ch, text, thread_ts=None: posted.append(text))
     monkeypatch.setattr(handlers, "github_get_file",
-                        lambda path: ("<!-- config:default=7 -->\n# r", "s"))
+                        lambda path: ('{"daily_count": 7}', "s"))
     main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config"})
     assert "7" in posted[0]
 
@@ -395,11 +403,15 @@ def test_handle_app_mention_config_set_commits(monkeypatch):
     commits = []
     monkeypatch.setattr(handlers, "slack_post_message",
                         lambda ch, text, thread_ts=None: posted.append(text))
-    monkeypatch.setattr(handlers, "github_get_file", lambda path: ("# r\n", "s"))
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5}', "s"))
     monkeypatch.setattr(handlers, "github_commit_files",
-                        lambda files, message, **kw: commits.append(message))
+                        lambda files, message, **kw: commits.append((files, message)))
     main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config --default=4"})
-    assert commits  # 커밋 발생
+    assert commits                                    # 커밋 발생
+    files, _ = commits[0]
+    assert list(files) == ["state.json"]              # README를 커밋하지 않는다
+    assert '"daily_count": 4' in files["state.json"]
     assert "4" in posted[-1]
 
 
@@ -604,7 +616,7 @@ def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
     monkeypatch.setattr(handlers, "call_gemini",
                         lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
     main.run_generate_routine()
-    assert calls["n"] == handlers._MAX_FILL_PER_RUN
+    assert calls["n"] == state.DEFAULTS["max_fill_per_run"]
 
 
 def test_model_answer_prompt_has_question_placeholder():
@@ -645,3 +657,153 @@ def test_handle_slack_event_reads_each_file_once(monkeypatch):
     assert calls.count("Java/Q001.md") == 1
     assert calls.count("README.md") == 1
     assert len([c for c in calls if c.endswith("/Java.md")]) == 1
+
+
+def test_config_set_preserves_unknown_fields(monkeypatch):
+    # 확장 기능을 위해 paused_until 같은 필드를 config 명령이 지우면 안 된다
+    commits = []
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5, "paused_until": "2026-08-01"}', "s"))
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: commits.append(files))
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config --default=8"})
+    assert '"paused_until": "2026-08-01"' in commits[0]["state.json"]
+
+
+def test_run_generate_routine_falls_back_when_state_missing(monkeypatch):
+    # state.json이 없어도(404) 기본값 5로 동작한다
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    captured = {}
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+
+    def fake_generate(r, count=5):
+        captured["count"] = count
+        return [("☕ Java", "t", "q")]
+
+    monkeypatch.setattr(handlers, "generate_questions", fake_generate)
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: (storage.EMPTY_README, "s") if path == "README.md"
+                        else (None, None))
+    monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-28")
+    main.run_generate_routine()
+    assert captured["count"] == 5
+
+
+def test_run_generate_uses_max_fill_from_state(monkeypatch):
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    r = storage.EMPTY_README
+    for i in range(1, 21):  # 미답변 20개
+        q = storage.Question(f"Q{i:03d}", "CS", storage.category_for_slug("CS"),
+                             f"t{i}", "2026-07-05", f"질문{i}")
+        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
+
+    def fake_get(path):
+        if path == "README.md":
+            return r, "s"
+        if path == "state.json":
+            return '{"max_fill_per_run": 3}', "s"
+        return "", None
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "generate_questions", lambda c, count=5: [("☕ Java", "t", "q")])
+    monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
+    monkeypatch.setattr(handlers, "slack_post_message", lambda *a, **k: None)
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
+    calls = {"n": 0}
+    monkeypatch.setattr(handlers, "call_gemini",
+                        lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
+    main.run_generate_routine()
+    assert calls["n"] == 3          # 상수 10이 아니라 state.json의 3을 따른다
+
+
+def test_run_generate_prunes_with_top_n_from_state(monkeypatch):
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    r = storage.EMPTY_README
+    for i in range(1, 6):  # CS 5개, 모두 답변 완료 상태로 둬서 fill 경로를 타지 않게 한다
+        q = storage.Question(f"Q{i:03d}", "CS", storage.category_for_slug("CS"),
+                             f"t{i}", "2026-07-05", f"질문{i}",
+                             answer="답", feedback="피드백", answered=True)
+        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
+
+    def fake_get(path):
+        if path == "README.md":
+            return r, "s"
+        if path == "state.json":
+            return '{"readme_top_n": 2}', "s"
+        return "", None
+
+    committed = {}
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "generate_questions", lambda c, count=5: [])
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files))
+    monkeypatch.setattr(handlers, "slack_post_message", lambda *a, **k: None)
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
+    main.run_generate_routine()
+    readme = committed["README.md"]
+    assert readme.count("<!-- q Q") == 2      # 카테고리당 2개만 남는다
+
+
+def _setup_generate_with_state(monkeypatch, state_json, posted, commits):
+    """루틴 A를 최소 구성으로 돌리기 위한 공통 목. state.json 내용만 바꿔가며 쓴다."""
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+
+    def fake_get(path):
+        if path == "README.md":
+            return storage.EMPTY_README, "s"
+        if path == "state.json":
+            return state_json, "s"
+        return "", None
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "generate_questions", lambda c, count=5: [("☕ Java", "t", "q")])
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: commits.append(message))
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+
+
+def test_run_generate_notifies_when_state_clamped(monkeypatch):
+    posted, commits = [], []
+    _setup_generate_with_state(monkeypatch, '{"readme_top_n": 0}', posted, commits)
+    main.run_generate_routine()
+    assert any("보정" in t and "readme_top_n" in t for t in posted)
+
+
+def test_run_generate_notifies_when_state_unparseable(monkeypatch):
+    posted, commits = [], []
+    _setup_generate_with_state(monkeypatch, '{ "daily_count": ', posted, commits)
+    main.run_generate_routine()
+    assert any("보정" in t for t in posted)
+    assert commits          # 기본값으로 정상 생성까지 완주한다
+
+
+def test_run_generate_does_not_notify_for_valid_state(monkeypatch):
+    posted, commits = [], []
+    _setup_generate_with_state(monkeypatch, '{"daily_count": 5}', posted, commits)
+    main.run_generate_routine()
+    assert not any("보정" in t for t in posted)
+
+
+def test_run_generate_survives_notify_failure(monkeypatch):
+    posted, commits = [], []
+    _setup_generate_with_state(monkeypatch, '{"readme_top_n": 0}', posted, commits)
+
+    def boom(ch, text, thread_ts=None):
+        raise RuntimeError("slack down")
+
+    monkeypatch.setattr(handlers, "slack_post_message", boom)
+    main.run_generate_routine()
+    assert commits          # 알림이 실패해도 커밋까지 완주한다
