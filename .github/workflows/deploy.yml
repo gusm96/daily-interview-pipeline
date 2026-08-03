@@ -4,9 +4,18 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'README.md'
-      - 'docs/**'
+    # 배포에 영향을 주는 파일만 나열한다(화이트리스트).
+    # 봇은 매일 07:00 루틴 A에서 CS/·Java/·SpringBoot/·Database/·Etc/의 문제 파일과
+    # 카테고리 인덱스, README.md를 main에 커밋한다. 이건 콘텐츠일 뿐 함수 코드가 아니므로
+    # 예전 paths-ignore(README.md·docs/**만 제외) 방식에서는 매일 불필요한 재배포가 돌았다.
+    # 제외 목록이 아니라 포함 목록으로 두면 카테고리가 새로 생겨도 자동으로 안전하다.
+    # state.json은 런타임에 GitHub API로 읽으므로(handlers.py) 재배포가 필요 없다.
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - '.github/workflows/deploy.yml'
+  # 화이트리스트에서 빠진 파일 때문에 배포가 필요한 경우를 위한 수동 실행구.
+  workflow_dispatch:
 
 env:
   PROJECT_ID: "${{ secrets.GCP_PROJECT_ID }}" # GCP 프로젝트 ID를 GitHub Secrets에서 불러와 사용합니다.
@@ -24,13 +33,13 @@ jobs:
 
     steps:
     - name: Checkout Source Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     # 1. Google Cloud 인증 (Workload Identity Federation)
     # 보안 정책상 서비스 계정 키 생성이 차단되므로, 보안이 우수하고 키가 필요 없는 WIF 인증을 사용합니다.
     - name: Authenticate to Google Cloud
       id: auth
-      uses: google-github-actions/auth@v2
+      uses: google-github-actions/auth@v3
       with:
         workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
         service_account: 'github-actions-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com'
@@ -64,7 +73,7 @@ jobs:
     # 선택지 B: Google Cloud Functions 배포 (활성화)
     # =========================================================================
     - name: Deploy to Cloud Functions
-      uses: google-github-actions/deploy-cloud-functions@v3
+      uses: google-github-actions/deploy-cloud-functions@v4
       with:
         name: ${{ env.SERVICE_NAME }}
         service_timeout: 300s
