@@ -1,3 +1,6 @@
 {
-  "daily_count": 5
+  "daily_count": 5,
+  "max_fill_per_run": 10,
+  "paused_until": "2026-08-06",
+  "readme_top_n": 5
 }
