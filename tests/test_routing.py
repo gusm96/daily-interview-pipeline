@@ -807,3 +807,321 @@ def test_run_generate_survives_notify_failure(monkeypatch):
     monkeypatch.setattr(handlers, "slack_post_message", boom)
     main.run_generate_routine()
     assert commits          # 알림이 실패해도 커밋까지 완주한다
+
+
+# --- 루틴 A 정지 (조기 종료) ---
+
+def _paused_env(monkeypatch, paused_until, readme="# README"):
+    """정지 상태의 루틴 A를 돌리기 위한 공통 준비. 조회된 경로 목록을 돌려준다."""
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    fetched = []
+
+    def fake_get(path):
+        fetched.append(path)
+        if path == "state.json":
+            return ('{"daily_count": 5, "paused_until": "%s"}' % paused_until, "s")
+        return (readme, "s")
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-08-05")
+    return fetched
+
+
+def test_run_generate_paused_does_not_fetch_readme(monkeypatch):
+    """정지 중에는 285KB짜리 README를 아예 받지 않는다.
+    읽기 순서가 되돌아가거나 조기 종료가 늦춰지면 여기서 잡힌다."""
+    fetched = _paused_env(monkeypatch, "2026-08-10")
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: pytest.fail("정지 중 커밋 발생"))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: pytest.fail("정지 중 Slack 전송"))
+    monkeypatch.setattr(handlers, "call_gemini",
+                        lambda *a, **kw: pytest.fail("정지 중 Gemini 호출"))
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda *a, **kw: pytest.fail("정지 중 질문 생성"))
+
+    main.run_generate_routine()
+
+    assert fetched == ["state.json"]          # README를 받지 않았다
+    assert "README.md" not in fetched
+
+
+def test_run_generate_paused_forever_is_also_silent(monkeypatch):
+    fetched = _paused_env(monkeypatch, "forever")
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: pytest.fail("정지 중 커밋 발생"))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: pytest.fail("정지 중 Slack 전송"))
+
+    main.run_generate_routine()
+
+    assert fetched == ["state.json"]
+
+
+def test_run_generate_paused_ignores_unanswered_questions(monkeypatch):
+    """README에 미답변이 있어도 결과가 같아야 한다 (R-3 폐기 — 모범답안 자동 작성 안 함)."""
+    readme = _fresh_readme_with_unanswered("Q002")
+    fetched = _paused_env(monkeypatch, "2026-08-10", readme=readme)
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: pytest.fail("정지 중 커밋 발생"))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: pytest.fail("정지 중 Slack 전송"))
+    monkeypatch.setattr(handlers, "call_gemini",
+                        lambda *a, **kw: pytest.fail("정지 중 모범답안 생성"))
+
+    main.run_generate_routine()
+
+    assert fetched == ["state.json"]
+
+
+def test_run_generate_paused_last_day_still_paused(monkeypatch):
+    # paused_until은 마지막 정지일이므로 그날 아침도 정지다
+    fetched = _paused_env(monkeypatch, "2026-08-05")
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: pytest.fail("정지 중 커밋 발생"))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: pytest.fail("정지 중 Slack 전송"))
+
+    main.run_generate_routine()
+
+    assert fetched == ["state.json"]
+
+
+def test_run_generate_expired_pause_clears_field_and_generates(monkeypatch):
+    """정지가 끝난 첫 아침: 정상 생성하고 그 커밋에서 paused_until이 사라진다."""
+    import json, storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(handlers, "call_gemini", lambda p, temperature: "AI답안")
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1")])
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5, "paused_until": "2026-08-01"}', "s")
+                        if path == "state.json" else (storage.EMPTY_README, "s"))
+    committed = {}
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files))
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-08-05")
+
+    main.run_generate_routine()
+
+    assert "state.json" in committed["files"]
+    assert "paused_until" not in json.loads(committed["files"]["state.json"])
+    assert "Java/Q001.md" in committed["files"]        # 신규 질문이 생성됐다
+
+
+def test_run_generate_corrupt_pause_value_is_cleaned(monkeypatch):
+    """훼손된 값은 '정지 아님'으로 떨어지고 그 커밋에서 정리된다."""
+    import json, storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(handlers, "call_gemini", lambda p, temperature: "AI답안")
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1")])
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5, "paused_until": "invalid"}', "s")
+                        if path == "state.json" else (storage.EMPTY_README, "s"))
+    committed = {}
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files))
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-08-05")
+
+    main.run_generate_routine()
+
+    assert "paused_until" not in json.loads(committed["files"]["state.json"])
+
+
+def test_run_generate_without_pause_field_does_not_commit_state_json(monkeypatch):
+    """평상시 아침에 내용이 같은 state.json을 매일 트리에 올리지 않는지."""
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(handlers, "slack_post_message", lambda ch, text, thread_ts=None: None)
+    monkeypatch.setattr(handlers, "call_gemini", lambda p, temperature: "AI답안")
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1")])
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5}', "s")
+                        if path == "state.json" else (storage.EMPTY_README, "s"))
+    committed = {}
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files))
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-08-05")
+
+    main.run_generate_routine()
+
+    assert "state.json" not in committed["files"]
+
+
+# --- stop/start 명령 처리 ---
+
+def _mention_env(monkeypatch, state_json='{"daily_count": 5}'):
+    """멘션 명령 테스트 공통 준비. (posted, commits, fetched) 반환."""
+    posted, commits, fetched = [], [], []
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+
+    def fake_get(path):
+        fetched.append(path)
+        return (state_json, "s")
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: commits.append((files, message)))
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-08-05")
+    return posted, commits, fetched
+
+
+def test_handle_stop_with_days_commits_computed_last_day(monkeypatch):
+    import json
+    posted, commits, _ = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 3"})
+    files, message = commits[0]
+    assert list(files) == ["state.json"]                      # README를 건드리지 않는다
+    # 오늘 포함 3일 → 마지막 정지일은 오늘+2
+    assert json.loads(files["state.json"])["paused_until"] == "2026-08-07"
+    assert "2026-08-07" in posted[-1] and "2026-08-08" in posted[-1]   # 마지막일·재개일 둘 다
+
+
+def test_handle_stop_with_date_stores_value_verbatim(monkeypatch):
+    import json
+    posted, commits, _ = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 2026-08-10"})
+    files, _ = commits[0]
+    assert json.loads(files["state.json"])["paused_until"] == "2026-08-10"
+    assert "2026-08-11" in posted[-1]                          # 재개일
+
+
+def test_handle_stop_without_arg_is_forever(monkeypatch):
+    import json
+    posted, commits, _ = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop"})
+    files, _ = commits[0]
+    assert json.loads(files["state.json"])["paused_until"] == "forever"
+    assert "start" in posted[-1]                               # 재개 방법 안내
+
+
+def test_handle_stop_out_of_range_days_does_not_touch_github(monkeypatch):
+    posted, commits, fetched = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 99"})
+    assert commits == []
+    assert fetched == []                    # 잘못된 입력이 GitHub API를 건드리지 않는다
+    assert "1~30" in posted[0]
+
+
+def test_handle_stop_zero_days_rejected(monkeypatch):
+    posted, commits, fetched = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 0"})
+    assert commits == [] and fetched == []
+    assert "1~30" in posted[0]
+
+
+def test_handle_stop_fake_date_rejected(monkeypatch):
+    posted, commits, fetched = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 2026-13-99"})
+    assert commits == [] and fetched == []
+    assert "YYYY-MM-DD" in posted[0]
+
+
+def test_handle_stop_past_date_rejected(monkeypatch):
+    posted, commits, fetched = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 2026-07-01"})
+    assert commits == [] and fetched == []
+    assert "2026-08-05" in posted[0]        # 오늘 날짜를 알려준다
+
+
+def test_handle_stop_today_is_allowed(monkeypatch):
+    import json
+    _, commits, _ = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 2026-08-05"})
+    files, _ = commits[0]
+    assert json.loads(files["state.json"])["paused_until"] == "2026-08-05"
+
+
+def test_handle_stop_typo_rejected_without_pausing(monkeypatch):
+    posted, commits, fetched = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop tomorow"})
+    assert commits == [] and fetched == []
+    assert "stop 3" in posted[0]            # 올바른 형식 안내
+
+
+def test_handle_stop_while_paused_replaces_not_extends(monkeypatch):
+    import json
+    _, commits, _ = _mention_env(
+        monkeypatch, state_json='{"daily_count": 5, "paused_until": "2026-08-20"}')
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 5"})
+    files, _ = commits[0]
+    # 연장이 아니라 오늘 기준 재계산 → 오늘+4
+    assert json.loads(files["state.json"])["paused_until"] == "2026-08-09"
+
+
+def test_handle_start_removes_field(monkeypatch):
+    import json
+    posted, commits, _ = _mention_env(
+        monkeypatch, state_json='{"daily_count": 5, "paused_until": "forever"}')
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> start"})
+    files, _ = commits[0]
+    assert "paused_until" not in json.loads(files["state.json"])
+    assert "재개" in posted[-1]
+
+
+def test_handle_start_when_not_paused_does_not_commit(monkeypatch):
+    posted, commits, _ = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> start"})
+    assert commits == []
+    assert "이미" in posted[0]
+
+
+def test_handle_config_show_appends_pause_status(monkeypatch):
+    posted, _, _ = _mention_env(
+        monkeypatch, state_json='{"daily_count": 5, "paused_until": "2026-08-07"}')
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config"})
+    assert "D-3" in posted[0]               # 오늘 포함 8/5·8/6·8/7 = 3일
+    assert "2026-08-08" in posted[0]        # 재개 예정일
+
+
+def test_handle_config_show_forever(monkeypatch):
+    posted, _, _ = _mention_env(
+        monkeypatch, state_json='{"daily_count": 5, "paused_until": "forever"}')
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config"})
+    assert "무기한" in posted[0]
+
+
+def test_handle_config_show_no_pause_line_when_active(monkeypatch):
+    posted, _, _ = _mention_env(monkeypatch)
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> config"})
+    assert "정지" not in posted[0]
+
+
+def test_handle_question_works_while_paused(monkeypatch):
+    """정지 중에도 수동 생성은 동작하고 paused_until을 건드리지 않는다 (R-5)."""
+    import storage
+    posted, commits, _ = _mention_env(
+        monkeypatch, state_json='{"daily_count": 5, "paused_until": "forever"}')
+    monkeypatch.setattr(handlers, "github_get_file",
+                        lambda path: ('{"daily_count": 5, "paused_until": "forever"}', "s")
+                        if path == "state.json" else (storage.EMPTY_README, "s"))
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1")])
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> 질문 1"})
+    files, _ = commits[0]
+    assert "Java/Q001.md" in files
+    assert "state.json" not in files        # 정지 상태를 건드리지 않는다
+
+
+def test_handle_stop_blocked_for_unauthorized(monkeypatch):
+    posted, commits, _ = _mention_env(monkeypatch)
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U_OWNER")
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> stop 3", "user": "U_OTHER"})
+    assert commits == []
+    assert "권한" in posted[0]
+
+
+def test_main_reexports_pause_helpers():
+    """기존 테스트들이 main.X로 접근하는 관례를 새 함수에도 유지한다."""
+    for name in ["is_paused", "get_paused_until", "set_paused_until",
+                 "shift_date_iso", "parse_iso_date", "days_left", "PAUSE_FOREVER"]:
+        assert hasattr(main, name), f"main에 {name}이 재노출되지 않았다"
