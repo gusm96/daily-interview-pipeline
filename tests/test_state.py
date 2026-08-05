@@ -1,3 +1,4 @@
+import pytest
 import state
 
 
@@ -30,9 +31,10 @@ def test_parse_state_missing_key_filled_with_default():
 
 
 def test_parse_state_preserves_unknown_keys():
-    # 구버전 배포가 신버전 필드를 지우고 커밋하는 사고를 막는 규칙
-    s = state.parse_state('{"paused_until": "2026-07-30"}')
-    assert s["paused_until"] == "2026-07-30"
+    # 구버전 배포가 신버전 필드를 지우고 커밋하는 사고를 막는 규칙.
+    # paused_until은 이제 실제로 쓰이는 키라 '모르는 키'의 예시가 될 수 없다.
+    s = state.parse_state('{"future_field": "2026-07-30"}')
+    assert s["future_field"] == "2026-07-30"
 
 
 def test_parse_state_wrong_type_falls_back_per_key():
@@ -148,3 +150,70 @@ def test_range_text_formats_bounds():
     assert state.range_text("daily_count") == "1~10"
     assert state.range_text("readme_top_n") == "1~15"
 
+
+
+# --- 정지 상태 (paused_until) ---
+
+def test_get_paused_until_absent_returns_none():
+    assert state.get_paused_until({"daily_count": 5}) is None
+
+
+def test_get_paused_until_reads_date_and_forever():
+    assert state.get_paused_until({"paused_until": "2026-08-10"}) == "2026-08-10"
+    assert state.get_paused_until({"paused_until": "forever"}) == "forever"
+
+
+@pytest.mark.parametrize("bad", [
+    "invalid", "2026_07_28", "2026-13-99", 20260728, None, True, "",
+])
+def test_get_paused_until_rejects_corrupt_values(bad):
+    # 훼손된 값이 '정지 아님'으로 떨어져야 한다.
+    # is_paused는 ISO 문자열 비교라, 검증이 없으면 "2026-07-27" <= "invalid" 가 True가 되어
+    # 사용자에게 아무 신호 없이 영구 정지된다. 이 테스트가 그 회귀를 막는다.
+    assert state.get_paused_until({"paused_until": bad}) is None
+    assert state.is_paused({"paused_until": bad}, "2026-07-27") is False
+
+
+def test_set_paused_until_inserts_and_replaces():
+    s1 = state.set_paused_until({"daily_count": 5}, "2026-08-10")
+    assert s1["paused_until"] == "2026-08-10"
+    s2 = state.set_paused_until(s1, "forever")
+    assert s2["paused_until"] == "forever"
+
+
+def test_set_paused_until_none_removes_key():
+    s = state.set_paused_until({"daily_count": 5, "paused_until": "forever"}, None)
+    assert "paused_until" not in s
+    assert s["daily_count"] == 5
+
+
+def test_set_paused_until_on_missing_key_is_safe():
+    # 루틴 A의 만료 정리가 조건 없이 호출하므로 키가 없어도 터지면 안 된다
+    assert state.set_paused_until({"daily_count": 5}, None) == {"daily_count": 5}
+
+
+def test_set_paused_until_does_not_mutate_original():
+    original = {"daily_count": 5}
+    state.set_paused_until(original, "forever")
+    assert "paused_until" not in original
+
+
+def test_is_paused_boundary_on_last_paused_day():
+    # paused_until은 '마지막 정지일'이라 그날까지 정지, 다음 날 재개
+    s = {"paused_until": "2026-08-10"}
+    assert state.is_paused(s, "2026-08-09") is True
+    assert state.is_paused(s, "2026-08-10") is True
+    assert state.is_paused(s, "2026-08-11") is False
+
+
+def test_is_paused_forever_always_true():
+    assert state.is_paused({"paused_until": "forever"}, "2099-01-01") is True
+
+
+def test_is_paused_absent_is_false():
+    assert state.is_paused({"daily_count": 5}, "2026-08-10") is False
+
+
+def test_pause_days_limit_present():
+    assert state.LIMITS["pause_days"] == (1, 30)
+    assert state.range_text("pause_days") == "1~30"
