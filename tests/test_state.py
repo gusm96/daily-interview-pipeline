@@ -69,15 +69,23 @@ def test_render_state_is_deterministic_regardless_of_key_order():
 
 
 def test_round_trip():
-    original = {"daily_count": 7, "max_fill_per_run": 8, "readme_top_n": 3,
-                "paused_until": "2026-07-30"}
+    original = {"daily_count": 7, "readme_top_n": 3,
+                "auto_stop_threshold": 30, "paused_until": "2026-07-30"}
     assert state.parse_state(state.render_state(original)) == original
 
 
 def test_parse_state_new_keys_have_defaults():
     s = state.parse_state(None)
-    assert s["max_fill_per_run"] == 10
+    assert s["auto_stop_threshold"] == 20
     assert s["readme_top_n"] == 5
+
+
+def test_parse_state_preserves_removed_max_fill_per_run():
+    # 배포 시점에 구버전 state.json이 남아 있어도 깨지지 않아야 한다.
+    # 이제 읽는 코드는 없지만 '모르는 키 보존' 규칙이 값을 지킨다.
+    s = state.parse_state('{"daily_count": 5, "max_fill_per_run": 3}')
+    assert s["max_fill_per_run"] == 3
+    assert s["daily_count"] == 5
 
 
 def test_parse_state_clamps_below_minimum():
@@ -87,7 +95,7 @@ def test_parse_state_clamps_below_minimum():
 
 def test_parse_state_clamps_above_maximum():
     assert state.parse_state('{"readme_top_n": 99}')["readme_top_n"] == 15
-    assert state.parse_state('{"max_fill_per_run": 50}')["max_fill_per_run"] == 10
+    assert state.parse_state('{"auto_stop_threshold": 500}')["auto_stop_threshold"] == 100
 
 
 def test_parse_state_keeps_boundary_values():
@@ -104,7 +112,7 @@ def test_warnings_records_clamped_key_only():
 
 def test_warnings_empty_for_valid_state():
     w = []
-    state.parse_state('{"daily_count": 5, "max_fill_per_run": 10, "readme_top_n": 5}', w)
+    state.parse_state('{"daily_count": 5, "auto_stop_threshold": 20, "readme_top_n": 5}', w)
     assert w == []
 
 
@@ -217,3 +225,24 @@ def test_is_paused_absent_is_false():
 def test_pause_days_limit_present():
     assert state.LIMITS["pause_days"] == (1, 30)
     assert state.range_text("pause_days") == "1~30"
+
+
+# --- 자동 정지 임계값 ---
+
+def test_auto_stop_threshold_default_is_20():
+    assert state.parse_state(None)["auto_stop_threshold"] == 20
+
+
+def test_auto_stop_threshold_clamped():
+    # 하한 5: 그 아래면 하루치 생성만으로 즉시 자동 정지돼 기능이 무의미해진다
+    assert state.parse_state('{"auto_stop_threshold": 0}')["auto_stop_threshold"] == 5
+    assert state.parse_state('{"auto_stop_threshold": 999}')["auto_stop_threshold"] == 100
+
+
+def test_auto_stop_threshold_keeps_boundary_values():
+    assert state.parse_state('{"auto_stop_threshold": 5}')["auto_stop_threshold"] == 5
+    assert state.parse_state('{"auto_stop_threshold": 100}')["auto_stop_threshold"] == 100
+
+
+def test_auto_stop_threshold_wrong_type_falls_back():
+    assert state.parse_state('{"auto_stop_threshold": "20"}')["auto_stop_threshold"] == 20

@@ -8,6 +8,7 @@ from retry import _request_with_retry
 logger = logging.getLogger("daily_interview_bot")
 
 GITHUB_API = "https://api.github.com"
+GITHUB_WEB = "https://github.com"
 
 class GitHubError(Exception):
     pass
@@ -23,6 +24,18 @@ def _contents_url(path):
     owner = os.environ.get("REPO_OWNER", "")
     name = os.environ.get("REPO_NAME", "")
     return f"{GITHUB_API}/repos/{owner}/{name}/contents/{path}"
+
+def github_blob_url(path, branch=None):
+    """저장소 파일을 사람이 브라우저로 여는 URL. I/O 없음.
+
+    _contents_url(API 주소)과 다르다 — 그건 기계용이고 이건 Slack에 실어 보낼 링크다.
+    브랜치 기본값은 github_commit_files와 같은 REPO_BRANCH를 따른다.
+    """
+    owner = os.environ.get("REPO_OWNER", "")
+    name = os.environ.get("REPO_NAME", "")
+    branch = branch or os.environ.get("REPO_BRANCH", "main")
+    return f"{GITHUB_WEB}/{owner}/{name}/blob/{branch}/{path}"
+
 
 def github_get_file(path):
     """path 파일의 (디코딩 content, sha) 반환. 404면 (None, None)."""
