@@ -241,22 +241,6 @@ def test_patch_toggle_body_only_targets_qid():
     assert "답변2" not in seg
 
 
-def test_scan_window_unanswered_lists_empty_only():
-    r = _readme_with(_q(id="Q001"), _q(id="Q002"))
-    r = storage.patch_toggle_body(r, "Q001", "답함", "피드백", ai_auto=False)
-    out = storage.scan_window_unanswered(r)
-    ids = [t[0] for t in out]
-    assert ids == ["Q002"]           # Q001은 답변 있음 → 제외
-    qid, slug, date, title, question = out[0]
-    assert slug == "CS" and date == "2026-07-05"
-    assert title == "TCP 흐름제어"
-    assert question == "흐름제어와 혼잡제어의 차이는?"
-
-
-def test_scan_window_excludes_ai_auto():
-    r = _readme_with(_q(id="Q001"))
-    r = storage.patch_toggle_body(r, "Q001", "AI답", "(AI 자동 작성 - 검토 필요)", ai_auto=True)
-    assert storage.scan_window_unanswered(r) == []
 
 
 def test_prune_overflow_keeps_top_n_per_category():
@@ -312,3 +296,64 @@ def test_build_readme_window_separates_by_category():
           _q(id="Q002", slug="Java", category=storage.category_for_slug("Java"))]
     r = storage.build_readme_window(qs, limit=5)
     assert "q Q001" in r and "q Q002" in r
+
+
+# --- 미답변 집계 ---
+
+def _index(rows):
+    """인덱스 텍스트를 만든다. rows: [(qid, title, date, status)]"""
+    head = "# 테스트 — 전체 문제 (총 %d개)\n\n| ID | 제목 | 출제일 | 상태 |\n| --- | --- | --- | --- |\n" % len(rows)
+    body = "".join(f"| [{q}](./{q}.md) | {t} | {d} | {s} |\n" for q, t, d, s in rows)
+    return head + body
+
+
+def test_status_label_uses_constants():
+    # 기존 인덱스 파일 188행이 이 문자열로 저장돼 있다. 바뀌면 집계가 전부 0이 된다.
+    assert storage.STATUS_ANSWERED == "✅ 답변완료"
+    assert storage.STATUS_AI_AUTO == "🤖 자동답안"
+    assert storage.STATUS_UNANSWERED == "⬜ 미답변"
+    q = storage.Question("Q001", "CS", "CS", "제목", "2026-08-01", "질문?")
+    assert storage.status_label(q) == storage.STATUS_UNANSWERED
+    q.ai_auto = True
+    assert storage.status_label(q) == storage.STATUS_AI_AUTO
+    q.answered = True
+    assert storage.status_label(q) == storage.STATUS_ANSWERED   # answered가 우선
+
+
+def test_unanswered_rows_picks_only_unanswered():
+    m = {"CS": _index([
+        ("Q003", "제목3", "2026-08-03", storage.STATUS_UNANSWERED),
+        ("Q002", "제목2", "2026-08-02", storage.STATUS_AI_AUTO),
+        ("Q001", "제목1", "2026-08-01", storage.STATUS_ANSWERED),
+    ])}
+    assert storage.unanswered_rows(m) == [("Q003", "CS", "제목3", "2026-08-03")]
+
+
+def test_unanswered_rows_spans_all_slugs():
+    m = {"CS": _index([("Q001", "c", "2026-08-01", storage.STATUS_UNANSWERED)]),
+         "Java": _index([("Q002", "j", "2026-08-02", storage.STATUS_UNANSWERED)])}
+    assert [r[0] for r in storage.unanswered_rows(m)] == ["Q002", "Q001"]
+
+
+def test_unanswered_rows_empty_map_and_missing_slugs():
+    assert storage.unanswered_rows({}) == []
+    assert storage.unanswered_rows({"CS": ""}) == []
+
+
+def test_unanswered_rows_sorts_descending_regardless_of_file_order():
+    # 손으로 고친 인덱스가 오름차순으로 뒤섞여 있어도 '최근 N개'가 흔들리면 안 된다
+    m = {"CS": _index([
+        ("Q001", "a", "2026-08-01", storage.STATUS_UNANSWERED),
+        ("Q005", "b", "2026-08-05", storage.STATUS_UNANSWERED),
+        ("Q003", "c", "2026-08-03", storage.STATUS_UNANSWERED),
+    ])}
+    assert [r[0] for r in storage.unanswered_rows(m)] == ["Q005", "Q003", "Q001"]
+
+
+def test_unanswered_rows_sorts_numerically_not_lexically():
+    # 문자열 정렬이면 "Q999" > "Q1000"이 되어 최신 문제가 뒤로 밀린다
+    m = {"CS": _index([
+        ("Q999", "a", "2026-08-01", storage.STATUS_UNANSWERED),
+        ("Q1000", "b", "2026-08-02", storage.STATUS_UNANSWERED),
+    ])}
+    assert [r[0] for r in storage.unanswered_rows(m)] == ["Q1000", "Q999"]

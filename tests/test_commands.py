@@ -113,3 +113,48 @@ def test_build_help_text_pause_range_follows_limits(monkeypatch):
     import state
     monkeypatch.setitem(state.LIMITS, "pause_days", (1, 20))
     assert "1~20" in main.build_help_text()
+
+
+# --- AI 모범답안 요청 명령 ---
+
+def test_parse_auto_returns_uppercase_qid():
+    # parse_mention_command는 본문을 .lower() 한다. 대문자로 되돌리지 않으면
+    # _find_slug_for_qid가 인덱스에서 q001을 찾지 못해 조용히 실패한다.
+    result = main.parse_mention_command("<@UBOT> auto Q001")
+    assert result == ("auto", "Q001")
+    assert result[1].isupper()
+
+
+def test_parse_auto_accepts_lowercase_input():
+    assert main.parse_mention_command("<@UBOT> auto q042") == ("auto", "Q042")
+
+
+def test_parse_auto_korean_alias():
+    assert main.parse_mention_command("<@UBOT> 자동답변 Q001") == ("auto", "Q001")
+
+
+def test_parse_auto_four_digit_qid():
+    assert main.parse_mention_command("<@UBOT> auto Q1000") == ("auto", "Q1000")
+
+
+def test_parse_auto_without_qid_is_invalid():
+    assert main.parse_mention_command("<@UBOT> auto") == ("auto_invalid", None)
+
+
+def test_parse_auto_with_bare_number_is_invalid():
+    # Q 접두어가 없으면 문제 번호로 보지 않는다
+    assert main.parse_mention_command("<@UBOT> auto 1") == ("auto_invalid", None)
+
+
+def test_auto_branch_does_not_hijack_existing_commands():
+    assert main.parse_mention_command("<@UBOT> help") == ("help", None)
+    assert main.parse_mention_command("<@UBOT> config") == ("config_show", None)
+    assert main.parse_mention_command("<@UBOT> 질문 3") == ("question", 3)
+    assert main.parse_mention_command("<@UBOT> stop 3") == ("stop", 3)
+    assert main.parse_mention_command("<@UBOT> start") == ("start", None)
+
+
+def test_build_help_text_lists_auto_command():
+    text = main.build_help_text()
+    assert "auto" in text
+    assert "Q001" in text
