@@ -8,18 +8,20 @@ import logging
 
 logger = logging.getLogger("daily_interview_bot")
 
-DEFAULTS = {"daily_count": 5, "max_fill_per_run": 10, "readme_top_n": 5}
+DEFAULTS = {"daily_count": 5, "readme_top_n": 5, "auto_stop_threshold": 20}
 
 # 허용 범위의 유일한 출처. 검증(사용자 입력 거부)과 클램프(파일 값 보정)가 이 표 하나를 본다.
-# max_fill_per_run 상한 10: 30초(GEMINI_TIMEOUT) × 10 = 300초 = 배포된 함수의 service_timeout.
 # readme_top_n 하한 1: 0이면 prune_overflow가 README를 영구히 비운다.
 LIMITS = {
     "daily_count": (1, 10),
-    "max_fill_per_run": (1, 10),
     "readme_top_n": (1, 15),
     # 정지 일수. state.json에 저장되는 설정이 아니라 `@봇 stop N` 인자의 검증 범위다.
     # parse_state의 클램프 루프는 DEFAULTS의 키만 순회하므로 파일 파싱에는 영향이 없다.
     "pause_days": (1, 30),
+    # 미답변이 이 개수 이상이면 루틴 A가 질문 생성을 자동 정지한다.
+    # 하한 5: 그 아래면 하루치 생성만으로 즉시 정지돼 기능이 무의미해진다.
+    # 상한 100: 그 이상은 사실상 자동 정지를 끈 것과 같다.
+    "auto_stop_threshold": (5, 100),
 }
 
 

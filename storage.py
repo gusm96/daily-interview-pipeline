@@ -39,13 +39,18 @@ class Question:
     ai_auto: bool = False
 
 
+STATUS_ANSWERED = "✅ 답변완료"
+STATUS_AI_AUTO = "🤖 자동답안"
+STATUS_UNANSWERED = "⬜ 미답변"
+
+
 def status_label(q):
     """인덱스/렌더용 상태 라벨. answered가 ai_auto보다 우선."""
     if q.answered:
-        return "✅ 답변완료"
+        return STATUS_ANSWERED
     if q.ai_auto:
-        return "🤖 자동답안"
-    return "⬜ 미답변"
+        return STATUS_AI_AUTO
+    return STATUS_UNANSWERED
 
 
 _META_RE = re.compile(
@@ -129,6 +134,23 @@ def _render_index(category, rows):
         for qid, title, date, status in rows
     )
     return header + table + body
+
+
+def unanswered_rows(index_texts_by_slug):
+    """{slug: index_text} → 미답변 행 [(qid, slug, title, date)], qid 내림차순. I/O 없음.
+
+    집계 범위는 인덱스 전체다. README 창(카테고리별 상위 N개)이 아니라 전체 이력을 본다 —
+    창 밖으로 밀려난 미답변 질문도 여전히 풀어야 할 문제이기 때문이다.
+    """
+    out = []
+    for slug in SLUGS:
+        for qid, title, date, status in _index_rows(index_texts_by_slug.get(slug, "")):
+            if status == STATUS_UNANSWERED:
+                out.append((qid, slug, title, date))
+    # 파일 등장 순서에 기대지 않는다(손으로 고친 인덱스가 뒤섞일 수 있다).
+    # 문자열 정렬을 쓰지 않는 이유: qid가 Q\d{3,}라 자릿수가 늘면 "Q999" > "Q1000"이 된다.
+    out.sort(key=lambda r: int(r[0][1:]), reverse=True)
+    return out
 
 
 def upsert_index_row(index_text, slug, category, qid, title, date, status):
@@ -314,24 +336,6 @@ def prune_overflow(readme, limit):
         if readme[s_idx:e_idx].strip() == "":
             readme = readme[:s_idx] + f"\n{_EMPTY_CATEGORY_NOTE}\n" + readme[e_idx:]
     return readme
-
-
-def scan_window_unanswered(readme):
-    """답변 공백 AND AI 태그 없음인 토글 → (qid, slug, date, title, question)."""
-    out = []
-    for qid, slug, date, toggle in _iter_toggles(readme):
-        body = _TOGGLE_BODY_RE(qid).search(readme)
-        if not body:
-            continue
-        answer_seg = body.group(2)
-        if answer_seg.strip() != "" or AI_AUTO_TAG in answer_seg:
-            continue
-        title_m = re.search(r"</b>\s*(.*?)\s*<i>", toggle)
-        q_m = re.search(r"\*\*Q\.\*\*\s*(.*?)\s*\n", toggle)
-        out.append((qid, slug, date,
-                    title_m.group(1) if title_m else "",
-                    q_m.group(1).strip() if q_m else ""))
-    return out
 
 
 def marker_info(readme, qid):

@@ -50,6 +50,8 @@ _CONFIG_SET_RE = re.compile(r"--default=(-?\d+)")
 _FIRST_INT_RE = re.compile(r"-?\d+")
 # stop 인자의 날짜 형식. 실재하는 날짜인지는 parse_iso_date가 따로 검증한다.
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# 문제 번호. parse_mention_command가 본문을 소문자로 내리므로 소문자로 잡는다.
+_QID_RE = re.compile(r"q\d{3,}")
 
 REQUIRED_ENV = [
     "GITHUB_TOKEN", "REPO_OWNER", "REPO_NAME", "GEMINI_API_KEY",

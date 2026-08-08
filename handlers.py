@@ -1,7 +1,7 @@
 import os
 import logging
 import storage
-from github_client import github_get_file, github_commit_files
+from github_client import github_get_file, github_commit_files, github_blob_url
 from gemini_client import (
     call_gemini, generate_questions, drop_duplicate_titles, FEEDBACK_THINKING_BUDGET,
 )
@@ -12,7 +12,7 @@ from slack_client import (
 from config import today_kst_iso, validate_env, shift_date_iso, parse_iso_date, days_left
 from state import (
     parse_state, render_state, in_range, range_text,
-    is_paused, get_paused_until, set_paused_until,
+    is_paused, get_paused_until, set_paused_until, PAUSE_FOREVER,
 )
 from commands import parse_mention_command, build_help_text, is_authorized_user
 from prompts import MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
@@ -20,12 +20,24 @@ from prompts import MODEL_ANSWER_PROMPT, FEEDBACK_PROMPT
 logger = logging.getLogger("daily_interview_bot")
 
 
-def _generate_and_stage(readme, count, today, files=None):
-    """신규 질문 count개를 생성해 (files, ids, questions, new_readme) 반환. 채점/모범답안 없음.
-    files를 넘기면(예: 루틴 A의 미답변 채움 단계에서 이미 쌓인 파일들) 이어서 누적한다."""
+def _load_index_map(files=None):
+    """{slug: index_text}. files에 이미 있으면 그걸, 없으면 원격 조회."""
     if files is None:
         files = {}
-    index_map = {s: _index_text(files, s) for s in storage.SLUGS}
+    return {s: _index_text(files, s) for s in storage.SLUGS}
+
+
+def _generate_and_stage(readme, count, today, files=None, index_map=None):
+    """신규 질문 count개를 생성해 (files, ids, questions, new_readme) 반환. 채점/모범답안 없음.
+
+    index_map을 넘기면 인덱스를 다시 읽지 않는다(루틴 A가 미답변 집계용으로 이미 읽는다).
+    넘기지 않으면 여기서 로드한다 — `@봇 질문` 경로가 이 기본값을 쓴다.
+    """
+    if files is None:
+        files = {}
+    if index_map is None:
+        index_map = _load_index_map(files)
+    index_map = dict(index_map)   # 호출부의 dict를 제자리에서 고치지 않는다
     # 중복 방지 컨텍스트는 README 윈도우(상위 5개)가 아니라 인덱스 전체 이력을 사용한다.
     questions = generate_questions(storage.existing_titles_block(index_map), count)
     questions = drop_duplicate_titles(questions, storage.existing_titles(index_map))
@@ -34,16 +46,18 @@ def _generate_and_stage(readme, count, today, files=None):
         slug = storage.slug_for(category)
         q = storage.Question(qid, slug, category, title, today, question)
         files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
-        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
-            _index_text(files, slug), slug, category, qid, title, today, storage.status_label(q))
+        index_map[slug] = storage.upsert_index_row(
+            index_map[slug], slug, category, qid, title, today, storage.status_label(q))
+        files[f"{slug}/{slug}.md"] = index_map[slug]
         readme = storage.insert_toggle(readme, storage.build_readme_toggle(q))
     return files, ids, questions, readme
 
 
 def run_generate_routine():
-    """루틴 A: 정지 판정 → 미답변 자동 모범답안 + 신규 질문 생성 → 1커밋 → Slack.
+    """루틴 A: 정지 판정 → 미답변 집계·안내 → 신규 질문 생성 → 1커밋 → Slack.
 
-    정지 중이면 state.json만 읽고 즉시 반환한다. README(285KB)도 받지 않는다.
+    모범답안을 자동 생성하지 않는다(풀 모델). 미답변은 개수와 최근 qid만 안내하고
+    실제 생성은 `@봇 auto {qid}`가 요청받을 때 한다.
     """
     missing = validate_env()
     if missing:
@@ -51,9 +65,10 @@ def run_generate_routine():
         raise RuntimeError(f"환경변수 누락: {missing}")
 
     today = today_kst_iso()
+    channel = os.environ.get("SLACK_CHANNEL_ID", "")
 
     # 0) 정지 판정 — 가장 먼저. 정지 중이면 README 조회조차 하지 않는다.
-    #    이 블록이 README 조회보다 아래로 내려가면 정지의 의미가 사라진다.
+    #    이 블록이 아래로 내려가면 정지의 의미가 사라진다.
     state_text, _ = github_get_file("state.json")
     state_warnings = []
     cfg = parse_state(state_text, state_warnings)
@@ -65,35 +80,41 @@ def run_generate_routine():
     if state_warnings:
         _notify_state_warnings(state_warnings)
 
-    readme, _ = github_get_file("README.md")
-    if readme is None:
-        readme = storage.EMPTY_README
+    # 1) 인덱스 로드 → 미답변 집계.
+    #    신규 생성 '전'에 세야 한다. 뒤에서 세면 오늘 보낸 질문이 미답변에 섞여
+    #    "미답변 47개"라면서 그중 5개를 방금 보낸 꼴이 된다.
+    index_map = _load_index_map()
+    pending = storage.unanswered_rows(index_map)
+
+    # 1-1) 자동 정지 판정. README 조회와 Gemini 호출보다 위여야 한다 —
+    #      자동 정지도 정지이므로 수동 정지와 같은 성질(큰 파일·외부 호출 없음)을 가져야 한다.
+    #      만료된 paused_until이 남아 있어도 set_paused_until이 forever로 덮어쓰므로 충돌하지 않는다.
+    threshold = cfg["auto_stop_threshold"]
+    if len(pending) >= threshold:
+        logger.info("미답변 %d개(임계값 %d), 질문 생성을 자동 정지합니다",
+                    len(pending), threshold)
+        cfg = set_paused_until(cfg, PAUSE_FOREVER)
+        github_commit_files({"state.json": render_state(cfg)},
+                            f"auto-pause: {len(pending)} unanswered")
+        _post(channel, _auto_pause_notice(pending, threshold))
+        return
+
     files = {}
 
-    # 1) 창 안 미답변 → 모범답안 생성 후 README 패치 + 문제 파일 + 인덱스
-    for qid, slug, date, title, question in storage.scan_window_unanswered(readme)[:cfg["max_fill_per_run"]]:
-        answer = call_gemini(MODEL_ANSWER_PROMPT.format(question=question), temperature=0.1)
-        feedback = "(AI 자동 작성 - 검토 필요)"
-        readme = storage.patch_toggle_body(readme, qid, answer, feedback, ai_auto=True)
-        category = storage.category_for_slug(slug)
-        q = storage.Question(qid, slug, category, title, date, question,
-                             answer=answer, feedback=feedback, ai_auto=True)
-        files[f"{slug}/{qid}.md"] = storage.render_question_file(q)
-        idx_text = _index_text(files, slug)
-        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
-            idx_text, slug, category, qid, title, date, storage.status_label(q))
-
     # 2) 만료된 정지 필드 정리. 여기까지 왔다는 건 정지가 아니라는 뜻이므로
-    #    paused_until이 남아 있다면 만료됐거나 훼손된 값이다. 추가 커밋 없이 5)에 실어 보낸다.
+    #    paused_until이 남아 있다면 만료됐거나 훼손된 값이다. 추가 커밋 없이 아래 커밋에 싣는다.
     #    두 조건이 필요한 이유: 만료된 정상 값("2026-08-01")은 앞 조건이 잡고,
     #    훼손된 값("invalid")은 get_paused_until이 None을 돌려주므로 뒤 조건이 잡는다.
     if get_paused_until(cfg) is not None or "paused_until" in cfg:
         cfg = set_paused_until(cfg, None)
         files["state.json"] = render_state(cfg)
 
-    # 3) 신규 질문 생성 (parse_state가 이미 범위로 클램프해 둔 값)
-    count = cfg["daily_count"]
-    files, ids, questions, readme = _generate_and_stage(readme, count, today, files)
+    # 3) README 로드 + 신규 질문 생성 (parse_state가 이미 범위로 클램프해 둔 값)
+    readme, _ = github_get_file("README.md")
+    if readme is None:
+        readme = storage.EMPTY_README
+    files, ids, questions, readme = _generate_and_stage(
+        readme, cfg["daily_count"], today, files, index_map)
 
     # 4) 카테고리별 상위 N개 초과분 prune
     readme = storage.prune_overflow(readme, cfg["readme_top_n"])
@@ -102,13 +123,45 @@ def run_generate_routine():
     # 5) 1커밋
     github_commit_files(files, "add daily questions")
 
-    # 6) Slack 전송
-    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    # 6) Slack 전송 — 미답변 안내가 먼저, 그다음 오늘의 질문
+    if pending:
+        _post(channel, _pending_notice(pending))
     for qid, (category, title, question) in zip(ids, questions):
-        try:
-            slack_post_message(channel, f"*[{qid}] {category} | {title}*\n{question}")
-        except Exception:
-            logger.exception("Slack 질문 전송 실패: %s", qid)
+        _post(channel, f"*[{qid}] {category} | {title}*\n{question}")
+
+
+def _post(channel, text):
+    """Slack 전송. 실패해도 이미 커밋된 결과가 유실되면 안 되므로 예외를 삼킨다."""
+    try:
+        slack_post_message(channel, text)
+    except Exception:
+        logger.exception("Slack 전송 실패")
+
+
+def _pending_notice(pending, limit=5):
+    """미답변 안내 문구. pending은 unanswered_rows 결과(qid 내림차순).
+
+    qid를 함께 싣는 이유: `@봇 auto`를 쓰려면 번호를 알아야 하는데 개수만 보면
+    행동할 수 없다. 전체 나열은 수십 줄짜리 벽이 되므로 최근 것만 보인다.
+    """
+    recent = ", ".join(qid for qid, _slug, _title, _date in pending[:limit])
+    return (f"📋 이전에 생성된 문제 중 미답변이 {len(pending)}개 있습니다.\n"
+            f"최근: {recent}\n"
+            f"AI 모범답안이 필요하면 `@봇 auto {pending[0][0]}` 를 입력해주세요.")
+
+
+def _auto_pause_notice(pending, threshold, limit=5):
+    """자동 정지 알림 문구.
+
+    이 알림은 한 번만 간다 — 정지된 다음 날 아침부터는 0단계 조기 종료가 먼저 걸려
+    집계까지 오지 않기 때문이다. 매일 잔소리하지 않는다.
+    """
+    recent = ", ".join(qid for qid, _slug, _title, _date in pending[:limit])
+    return (f"⏸️ 미답변이 {len(pending)}개(임계값 {threshold})를 넘어 "
+            f"질문 생성을 자동 정지했습니다.\n"
+            f"최근: {recent}\n"
+            f"`@봇 auto {pending[0][0]}` 로 모범답안을 받거나 스레드에 직접 답변해주세요.\n"
+            f"정리 후 `@봇 start` 로 재개할 수 있습니다.")
 
 
 def _notify_state_warnings(warnings):
@@ -282,7 +335,62 @@ def handle_app_mention(event):
             return
         cfg = set_paused_until(cfg, None)
         github_commit_files({"state.json": render_state(cfg)}, "resume question generation")
-        reply("질문 생성을 재개했습니다. 다음 아침 7시부터 질문이 도착합니다.")
+        lines = ["질문 생성을 재개했습니다. 다음 아침 7시부터 질문이 도착합니다."]
+        # 임계값을 넘긴 채로 재개하면 내일 아침 다시 자동 정지된다. 미리 알린다.
+        # 인덱스 5회 조회가 붙지만 수동 명령이라 빈도가 낮아 감수한다.
+        pending = storage.unanswered_rows(_load_index_map())
+        threshold = cfg["auto_stop_threshold"]
+        if len(pending) >= threshold:
+            lines.append(f"⚠️ 미답변이 {len(pending)}개로 임계값 {threshold}을 넘어 "
+                         "내일 아침 다시 자동 정지됩니다.")
+        reply("\n".join(lines))
+        return
+
+    if command == "auto_invalid":
+        reply("문제 번호를 함께 입력해주세요. 예: `@봇 auto Q001`")
+        return
+
+    if command == "auto":
+        qid = arg
+        slug = _find_slug_for_qid(qid)
+        if not slug:
+            reply(f"{qid} 문제를 찾지 못했습니다.")
+            return
+        qfile_text, _ = github_get_file(f"{slug}/{qid}.md")
+        if not qfile_text:
+            reply(f"{qid} 문제 파일이 없습니다.")
+            return
+        q = storage.parse_question_file(qfile_text)
+
+        # 덮어쓰기 방지. 규칙은 하나다 — "답변이 이미 있으면 거부".
+        # ✅와 🤖를 함께 막으므로 사용자의 답변이 AI 답안에 덮이는 경로가 존재하지 않는다.
+        if q.answered:
+            reply(f"{qid}은 이미 직접 답변한 문제입니다. AI 답안으로 덮어쓰지 않습니다.")
+            return
+        if q.ai_auto:
+            reply(f"{qid}은 이미 AI 모범답안이 작성돼 있습니다.")
+            return
+
+        answer = call_gemini(MODEL_ANSWER_PROMPT.format(question=q.question), temperature=0.1)
+        feedback = "(AI 자동 작성 - 검토 필요)"
+        q.answer, q.feedback, q.ai_auto, q.answered = answer, feedback, True, False
+        files = {f"{slug}/{qid}.md": storage.render_question_file(q)}
+        idx_text, _ = github_get_file(f"{slug}/{slug}.md")
+        files[f"{slug}/{slug}.md"] = storage.upsert_index_row(
+            idx_text or "", slug, q.category, qid, q.title, q.date, storage.status_label(q))
+        # README 토글은 창 안일 때만 존재한다. 루틴 B와 같은 가드를 쓴다.
+        readme, _ = github_get_file("README.md")
+        if readme and storage.has_toggle(readme, qid):
+            try:
+                files["README.md"] = storage.patch_toggle_body(
+                    readme, qid, answer, feedback, ai_auto=True)
+            except ValueError:
+                logger.warning("README 토글 패치 실패(본문 손상 가능), 문제 파일만 갱신: %s", qid)
+        github_commit_files(files, f"auto answer {qid}")
+        # 본문 대신 링크만 보낸다. 저장소가 정본이고, 모범답안은 길이가 예측되지 않아
+        # Slack 메시지 한도(약 4000자)에 걸릴 수 있다. 링크는 항상 짧다.
+        reply(f"✅ {qid} AI 모범답안을 생성했습니다.\n"
+              f"{github_blob_url(f'{slug}/{qid}.md')}")
         return
 
     if command == "config_show":

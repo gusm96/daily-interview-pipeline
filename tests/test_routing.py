@@ -53,6 +53,7 @@ def _fresh_readme_with_unanswered(qid="Q002"):
 
 
 def test_run_generate_routine_flow(monkeypatch):
+    """루틴 A 기본 경로: 신규 질문만 생성하고 모범답안은 만들지 않는다(풀 모델)."""
     import storage
     for k in REQUIRED:
         monkeypatch.setenv(k, "x")
@@ -60,7 +61,7 @@ def test_run_generate_routine_flow(monkeypatch):
     monkeypatch.setattr(handlers, "slack_post_message",
                         lambda ch, text, thread_ts=None: posted.append(text))
     monkeypatch.setattr(handlers, "call_gemini",
-                        lambda p, temperature: "AI답안")            # 모범답안
+                        lambda *a, **kw: pytest.fail("루틴 A가 모범답안을 생성했다"))
     monkeypatch.setattr(handlers, "generate_questions",
                         lambda r, count=5: [("☕ Java", "제목1", "새 질문1"),
                                             ("🗄️ Database", "제목2", "새 질문2")])
@@ -75,14 +76,13 @@ def test_run_generate_routine_flow(monkeypatch):
     main.run_generate_routine()
 
     files = committed["files"]
-    # 신규 질문 2개 파일 + 각 인덱스 + README
-    assert "Java/Q003.md" in files and "Database/Q004.md" in files
+    # 신규 질문 2개 파일 + 각 인덱스 + README. 인덱스가 비어 있으므로 ID는 Q001부터다.
+    assert "Java/Q001.md" in files and "Database/Q002.md" in files
     assert "README.md" in files
-    # 미답변 Q002 자동답안 반영(README 토글 + 문제 파일)
-    assert "AI답안" in files["README.md"]
-    assert "Java/Q002.md" in files
-    # Slack에 신규 질문 2건, ID 포함
-    assert len(posted) == 2 and any("Q003" in t for t in posted)
+    # 자동 채움이 사라졌으므로 기존 미답변 Q002의 문제 파일은 건드리지 않는다
+    assert "Java/Q002.md" not in files
+    # Slack에 신규 질문 2건만(인덱스가 비어 미답변 안내는 없다), ID 포함
+    assert len(posted) == 2 and any("Q001" in t for t in posted)
 
 
 def test_run_generate_feeds_full_history_not_just_window(monkeypatch):
@@ -596,28 +596,6 @@ def test_today_kst_iso_at_0700_kst_returns_same_kst_day(monkeypatch):
     assert config.today_kst_iso() == "2026-06-30"
 
 
-def test_run_generate_caps_unanswered_fill_calls(monkeypatch):
-    import storage
-    for k in REQUIRED:
-        monkeypatch.setenv(k, "x")
-    # README에 미답변 20개
-    r = storage.EMPTY_README
-    for i in range(1, 21):
-        q = storage.Question(f"Q{i:03d}", "CS", storage.category_for_slug("CS"),
-                             f"t{i}", "2026-07-05", f"질문{i}")
-        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
-    monkeypatch.setattr(handlers, "github_get_file",
-                        lambda path: (r, "s") if path == "README.md" else ("", None))
-    monkeypatch.setattr(handlers, "generate_questions", lambda c, count=5: [("☕ Java", "t", "q")])
-    monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
-    monkeypatch.setattr(handlers, "slack_post_message", lambda *a, **k: None)
-    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
-    calls = {"n": 0}
-    monkeypatch.setattr(handlers, "call_gemini",
-                        lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
-    main.run_generate_routine()
-    assert calls["n"] == state.DEFAULTS["max_fill_per_run"]
-
 
 def test_model_answer_prompt_has_question_placeholder():
     from prompts import MODEL_ANSWER_PROMPT
@@ -692,34 +670,6 @@ def test_run_generate_routine_falls_back_when_state_missing(monkeypatch):
     main.run_generate_routine()
     assert captured["count"] == 5
 
-
-def test_run_generate_uses_max_fill_from_state(monkeypatch):
-    import storage
-    for k in REQUIRED:
-        monkeypatch.setenv(k, "x")
-    r = storage.EMPTY_README
-    for i in range(1, 21):  # 미답변 20개
-        q = storage.Question(f"Q{i:03d}", "CS", storage.category_for_slug("CS"),
-                             f"t{i}", "2026-07-05", f"질문{i}")
-        r = storage.insert_toggle(r, storage.build_readme_toggle(q))
-
-    def fake_get(path):
-        if path == "README.md":
-            return r, "s"
-        if path == "state.json":
-            return '{"max_fill_per_run": 3}', "s"
-        return "", None
-
-    monkeypatch.setattr(handlers, "github_get_file", fake_get)
-    monkeypatch.setattr(handlers, "generate_questions", lambda c, count=5: [("☕ Java", "t", "q")])
-    monkeypatch.setattr(handlers, "github_commit_files", lambda files, message, **kw: None)
-    monkeypatch.setattr(handlers, "slack_post_message", lambda *a, **k: None)
-    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-07-06")
-    calls = {"n": 0}
-    monkeypatch.setattr(handlers, "call_gemini",
-                        lambda prompt, temperature: (calls.__setitem__("n", calls["n"] + 1), "답")[1])
-    main.run_generate_routine()
-    assert calls["n"] == 3          # 상수 10이 아니라 state.json의 3을 따른다
 
 
 def test_run_generate_prunes_with_top_n_from_state(monkeypatch):
@@ -1124,4 +1074,402 @@ def test_main_reexports_pause_helpers():
     """기존 테스트들이 main.X로 접근하는 관례를 새 함수에도 유지한다."""
     for name in ["is_paused", "get_paused_until", "set_paused_until",
                  "shift_date_iso", "parse_iso_date", "days_left", "PAUSE_FOREVER"]:
+        assert hasattr(main, name), f"main에 {name}이 재노출되지 않았다"
+
+
+# --- 루틴 A: 미답변 안내 (자동 채움 제거) ---
+
+def _index_text(rows):
+    """인덱스 텍스트. rows: [(qid, title, date, status)]"""
+    head = "# 테스트\n\n| ID | 제목 | 출제일 | 상태 |\n| --- | --- | --- | --- |\n"
+    return head + "".join(f"| [{q}](./{q}.md) | {t} | {d} | {s} |\n" for q, t, d, s in rows)
+
+
+def _routine_env(monkeypatch, cs_rows=(), state_json='{"daily_count": 5}'):
+    """루틴 A 공통 준비. (posted, committed, fetched) 반환."""
+    import storage
+    for k in REQUIRED:
+        monkeypatch.setenv(k, "x")
+    posted, committed, fetched = [], {}, []
+
+    def fake_get(path):
+        fetched.append(path)
+        if path == "state.json":
+            return (state_json, "s")
+        if path == "README.md":
+            return (storage.EMPTY_README, "s")
+        if path == "CS/CS.md":
+            return (_index_text(cs_rows), "s")
+        return ("", None)
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: committed.update(files=files, msg=message))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "제목1", "새 질문1")])
+    monkeypatch.setattr(handlers, "today_kst_iso", lambda: "2026-08-08")
+    return posted, committed, fetched
+
+
+def test_routine_a_never_generates_model_answers(monkeypatch):
+    """자동 채움 제거 검증. call_gemini가 불리면 실패한다."""
+    import storage
+    monkeypatch.setattr(handlers, "call_gemini",
+                        lambda *a, **kw: pytest.fail("루틴 A가 모범답안을 생성했다"))
+    rows = [("Q001", "제목1", "2026-08-01", storage.STATUS_UNANSWERED)]
+    posted, committed, _ = _routine_env(monkeypatch, cs_rows=rows)
+
+    main.run_generate_routine()
+
+    assert committed["files"]                       # 신규 질문은 정상 커밋
+
+
+def test_routine_a_sends_pending_notice_before_questions(monkeypatch):
+    import storage
+    rows = [("Q003", "c", "2026-08-03", storage.STATUS_UNANSWERED),
+            ("Q002", "b", "2026-08-02", storage.STATUS_UNANSWERED),
+            ("Q001", "a", "2026-08-01", storage.STATUS_AI_AUTO)]
+    posted, _, _ = _routine_env(monkeypatch, cs_rows=rows)
+
+    main.run_generate_routine()
+
+    assert "미답변이 2개" in posted[0]              # 안내가 첫 메시지
+    assert "Q003" in posted[0] and "Q002" in posted[0]
+    assert "Q001" not in posted[0]                  # 🤖는 세지 않는다
+    assert "새 질문1" in posted[1]                  # 신규 질문이 그다음
+
+
+def test_routine_a_pending_count_excludes_todays_new_questions(monkeypatch):
+    """집계는 신규 생성 '전' 값이어야 한다. 뒤에서 세면 방금 보낸 질문이 섞인다."""
+    import storage
+    rows = [("Q001", "a", "2026-08-01", storage.STATUS_UNANSWERED)]
+    posted, _, _ = _routine_env(monkeypatch, cs_rows=rows)
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda r, count=5: [("☕ Java", "t1", "q1"), ("☕ Java", "t2", "q2")])
+
+    main.run_generate_routine()
+
+    assert "미답변이 1개" in posted[0]              # 3개가 아니다
+
+
+def test_routine_a_no_notice_when_nothing_pending(monkeypatch):
+    posted, _, _ = _routine_env(monkeypatch, cs_rows=[])
+
+    main.run_generate_routine()
+
+    assert not any("미답변" in t for t in posted)
+    assert "새 질문1" in posted[0]
+
+
+def test_routine_a_notice_failure_does_not_block_questions(monkeypatch):
+    """안내 전송이 실패해도 신규 질문 전송은 계속돼야 한다."""
+    import storage
+    rows = [("Q001", "a", "2026-08-01", storage.STATUS_UNANSWERED)]
+    posted, _, _ = _routine_env(monkeypatch, cs_rows=rows)
+    calls = {"n": 0}
+
+    def flaky(ch, text, thread_ts=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("slack down")
+        posted.append(text)
+
+    monkeypatch.setattr(handlers, "slack_post_message", flaky)
+
+    main.run_generate_routine()
+
+    assert any("새 질문1" in t for t in posted)
+
+
+# --- 루틴 A: 미답변 자동 정지 ---
+
+def _pending(n, start=1):
+    """미답변 n건짜리 인덱스 행. qid는 Q001부터."""
+    import storage
+    return [(f"Q{start + i:03d}", f"t{i}", "2026-08-01", storage.STATUS_UNANSWERED)
+            for i in range(n)]
+
+
+def test_auto_pause_when_threshold_reached(monkeypatch):
+    import json
+    posted, committed, fetched = _routine_env(
+        monkeypatch, cs_rows=_pending(20),
+        state_json='{"daily_count": 5, "auto_stop_threshold": 20}')
+    monkeypatch.setattr(handlers, "generate_questions",
+                        lambda *a, **kw: pytest.fail("자동 정지 중 질문 생성"))
+
+    main.run_generate_routine()
+
+    files = committed["files"]
+    assert list(files) == ["state.json"]                    # state.json 한 파일만
+    assert json.loads(files["state.json"])["paused_until"] == "forever"
+    assert "20" in posted[0] and "자동 정지" in posted[0]
+    assert "README.md" not in fetched                       # 285KB를 받지 않는다
+
+
+def test_auto_pause_boundary_19_still_generates(monkeypatch):
+    posted, committed, _ = _routine_env(
+        monkeypatch, cs_rows=_pending(19),
+        state_json='{"daily_count": 5, "auto_stop_threshold": 20}')
+
+    main.run_generate_routine()
+
+    assert "README.md" in committed["files"]                # 정상 생성 경로
+    assert "미답변이 19개" in posted[0]
+    assert "자동 정지" not in posted[0]
+
+
+def test_auto_pause_uses_configured_threshold(monkeypatch):
+    import json
+    _, committed, _ = _routine_env(
+        monkeypatch, cs_rows=_pending(6),
+        state_json='{"daily_count": 5, "auto_stop_threshold": 5}')
+
+    main.run_generate_routine()
+
+    assert json.loads(committed["files"]["state.json"])["paused_until"] == "forever"
+
+
+def test_auto_pause_notice_lists_recent_qids(monkeypatch):
+    posted, _, _ = _routine_env(
+        monkeypatch, cs_rows=_pending(20),
+        state_json='{"daily_count": 5, "auto_stop_threshold": 20}')
+
+    main.run_generate_routine()
+
+    assert "Q020" in posted[0]           # 최근순 상위
+    assert "auto" in posted[0] and "start" in posted[0]
+
+
+def test_auto_pause_fires_only_once(monkeypatch):
+    """정지된 다음 날 아침은 0단계 조기 종료가 먼저 걸려 인덱스도 읽지 않는다."""
+    posted, committed, fetched = _routine_env(
+        monkeypatch, cs_rows=_pending(20),
+        state_json='{"daily_count": 5, "auto_stop_threshold": 20, "paused_until": "forever"}')
+
+    main.run_generate_routine()
+
+    assert fetched == ["state.json"]
+    assert committed == {}
+    assert posted == []
+
+
+def test_auto_pause_overrides_expired_pause_field(monkeypatch):
+    """만료된 값이 남아 있고 동시에 임계값을 넘으면 forever가 덮어쓴다."""
+    import json
+    _, committed, _ = _routine_env(
+        monkeypatch, cs_rows=_pending(20),
+        state_json='{"daily_count": 5, "auto_stop_threshold": 20, "paused_until": "2026-08-01"}')
+
+    main.run_generate_routine()
+
+    assert json.loads(committed["files"]["state.json"])["paused_until"] == "forever"
+
+
+# --- @봇 auto 명령 ---
+
+def _qfile(qid="Q001", slug="CS", answered=False, ai_auto=False):
+    """문제 파일 마크다운. storage.render_question_file로 만든다."""
+    import storage
+    q = storage.Question(qid, slug, storage.category_for_slug(slug),
+                         "TCP와 UDP 차이", "2026-08-01", "TCP와 UDP의 차이는?",
+                         answer="기존답변" if (answered or ai_auto) else "",
+                         feedback="기존피드백" if (answered or ai_auto) else "",
+                         answered=answered, ai_auto=ai_auto)
+    return storage.render_question_file(q)
+
+
+def _auto_env(monkeypatch, qfile_text=None, readme=None):
+    """@봇 auto 공통 준비. (posted, commits, fetched) 반환."""
+    import storage
+    monkeypatch.setenv("REPO_OWNER", "gusm96")
+    monkeypatch.setenv("REPO_NAME", "daily-interview-pipeline")
+    monkeypatch.delenv("REPO_BRANCH", raising=False)
+    posted, commits, fetched = [], [], []
+
+    def fake_get(path):
+        fetched.append(path)
+        if path.endswith("/CS.md"):
+            return (_index_text([("Q001", "TCP와 UDP 차이", "2026-08-01",
+                                  storage.STATUS_UNANSWERED)]), "s")
+        if path == "CS/Q001.md":
+            return (qfile_text if qfile_text is not None else _qfile(), "s")
+        if path == "README.md":
+            return (readme if readme is not None else storage.EMPTY_README, "s")
+        return ("", None)
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: commits.append((files, message)))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    monkeypatch.setattr(handlers, "call_gemini", lambda p, temperature: "AI모범답안본문")
+    return posted, commits, fetched
+
+
+def test_auto_generates_and_commits(monkeypatch):
+    import storage
+    posted, commits, _ = _auto_env(monkeypatch)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    files, message = commits[0]
+    assert "CS/Q001.md" in files
+    assert "CS/CS.md" in files
+    assert storage.STATUS_AI_AUTO in files["CS/CS.md"]      # 인덱스 배지 갱신
+    assert "AI모범답안본문" in files["CS/Q001.md"]
+    assert "Q001" in message
+
+
+def test_auto_replies_with_github_link_not_body(monkeypatch):
+    """모범답안 본문을 Slack에 싣지 않는다 — 4000자 한도에 걸릴 경로를 없앤다.
+    저장소가 정본이고 Slack은 그리로 가는 안내만 한다."""
+    posted, _, _ = _auto_env(monkeypatch)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    assert ("https://github.com/gusm96/daily-interview-pipeline/blob/main/CS/Q001.md"
+            in posted[-1])
+    assert "AI모범답안본문" not in posted[-1]
+
+
+def test_auto_link_follows_repo_branch_env(monkeypatch):
+    posted, _, _ = _auto_env(monkeypatch)
+    monkeypatch.setenv("REPO_BRANCH", "develop")
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    assert "/blob/develop/CS/Q001.md" in posted[-1]
+
+
+def test_auto_refuses_when_already_answered_by_user(monkeypatch):
+    posted, commits, _ = _auto_env(monkeypatch, qfile_text=_qfile(answered=True))
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    assert commits == []                                    # 덮어쓰지 않는다
+    assert "이미 직접 답변" in posted[0]
+
+
+def test_auto_refuses_when_already_ai_answered(monkeypatch):
+    posted, commits, _ = _auto_env(monkeypatch, qfile_text=_qfile(ai_auto=True))
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    assert commits == []
+    assert "이미 AI 모범답안" in posted[0]
+
+
+def test_auto_does_not_call_gemini_when_refused(monkeypatch):
+    posted, commits, _ = _auto_env(monkeypatch, qfile_text=_qfile(answered=True))
+    monkeypatch.setattr(handlers, "call_gemini",
+                        lambda *a, **kw: pytest.fail("거부해야 할 요청에 Gemini 호출"))
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    assert commits == []
+
+
+def test_auto_without_qid_does_not_touch_github(monkeypatch):
+    posted, commits, fetched = _auto_env(monkeypatch)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto"})
+
+    assert commits == [] and fetched == []
+    assert "Q001" in posted[0]                              # 형식 예시 안내
+
+
+def test_auto_unknown_qid_reports_not_found(monkeypatch):
+    posted, commits, _ = _auto_env(monkeypatch)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q999"})
+
+    assert commits == []
+    assert "Q999" in posted[0] and "찾지 못했" in posted[0]
+
+
+def test_auto_patches_readme_toggle_when_present(monkeypatch):
+    import storage
+    q = storage.Question("Q001", "CS", storage.category_for_slug("CS"),
+                         "TCP와 UDP 차이", "2026-08-01", "TCP와 UDP의 차이는?")
+    readme = storage.insert_toggle(storage.EMPTY_README, storage.build_readme_toggle(q))
+    _, commits, _ = _auto_env(monkeypatch, readme=readme)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    files, _ = commits[0]
+    assert "AI모범답안본문" in files["README.md"]
+
+
+def test_auto_skips_readme_when_toggle_absent(monkeypatch):
+    """창 밖으로 밀려난 질문도 문제 파일·인덱스는 정상 갱신돼야 한다."""
+    import storage
+    _, commits, _ = _auto_env(monkeypatch, readme=storage.EMPTY_README)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001"})
+
+    files, _ = commits[0]
+    assert "README.md" not in files
+    assert "CS/Q001.md" in files
+
+
+def test_auto_blocked_for_unauthorized(monkeypatch):
+    posted, commits, _ = _auto_env(monkeypatch)
+    monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U_OWNER")
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> auto Q001", "user": "U_OTHER"})
+
+    assert commits == []
+    assert "권한" in posted[0]
+
+
+# --- start 경고 + 재노출 ---
+
+def _start_env(monkeypatch, unanswered_count, threshold=20):
+    import storage
+    posted, commits = [], []
+    rows = [(f"Q{i + 1:03d}", f"t{i}", "2026-08-01", storage.STATUS_UNANSWERED)
+            for i in range(unanswered_count)]
+
+    def fake_get(path):
+        if path == "state.json":
+            return ('{"daily_count": 5, "paused_until": "forever", '
+                    f'"auto_stop_threshold": {threshold}}}', "s")
+        if path.endswith("/CS.md"):
+            return (_index_text(rows), "s")
+        return ("", None)
+
+    monkeypatch.setattr(handlers, "github_get_file", fake_get)
+    monkeypatch.setattr(handlers, "github_commit_files",
+                        lambda files, message, **kw: commits.append((files, message)))
+    monkeypatch.setattr(handlers, "slack_post_message",
+                        lambda ch, text, thread_ts=None: posted.append(text))
+    return posted, commits
+
+
+def test_start_warns_when_still_over_threshold(monkeypatch):
+    posted, commits = _start_env(monkeypatch, unanswered_count=23, threshold=20)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> start"})
+
+    assert commits                              # 재개는 시킨다
+    assert "재개" in posted[-1]
+    assert "23" in posted[-1] and "20" in posted[-1]
+    assert "자동 정지" in posted[-1]
+
+
+def test_start_no_warning_when_under_threshold(monkeypatch):
+    posted, commits = _start_env(monkeypatch, unanswered_count=3, threshold=20)
+
+    main.handle_app_mention({"channel": "C1", "text": "<@UBOT> start"})
+
+    assert commits
+    assert "재개" in posted[-1]
+    assert "자동 정지" not in posted[-1]
+
+
+def test_main_reexports_pull_helpers():
+    for name in ["unanswered_rows", "STATUS_UNANSWERED", "STATUS_AI_AUTO", "STATUS_ANSWERED"]:
         assert hasattr(main, name), f"main에 {name}이 재노출되지 않았다"
